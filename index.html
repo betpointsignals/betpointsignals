@@ -38,7 +38,7 @@ async function submitRowId() {
 
   try {
     // Verify with backend
-    const res = await fetch('https://YOUR_BACKEND_URL/verify-link', {
+    const res = await fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
@@ -90,7 +90,7 @@ function initOneSignal() {
 // Register device with backend
 function registerDevice() {
   if (!rowId || !playerId) return;
-  fetch('https://YOUR_BACKEND_URL/register-device', {
+  fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ rowId, playerId, deviceType, linkId })
