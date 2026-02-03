@@ -130,11 +130,11 @@ function initOneSignal() {
         // 1️⃣ Set External ID = rowId
         await OneSignal.login(rowIdLocal);
 
-        // 2️⃣ Get OneSignal ID
+        // 2️⃣ Get OneSignal ID (playerId)
         const playerId = await OneSignal.getUserId();
 
         // 3️⃣ Save to Supabase users table
-        fetch(REGISTER_URL, {
+        await fetch(REGISTER_URL, {
           method:"POST",
           headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
@@ -143,10 +143,9 @@ function initOneSignal() {
             one_signal_id: playerId,  // save OneSignal ID
             device_type: deviceType   // save device type
           })
-        })
-        .then(res => res.json())
-        .then(console.log)
-        .catch(console.error);
+        });
+
+        console.log("Saved OneSignal ID for user:", rowIdLocal, playerId);
 
       } catch(err) {
         console.error("Error saving OneSignal ID:", err);
