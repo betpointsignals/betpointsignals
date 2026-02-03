@@ -8,17 +8,13 @@
 <!-- PWA -->
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#007bff">
-
-<!-- iOS Icon -->
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
 <!-- OneSignal SDK -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
-html, body {
-  margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000;
-}
+html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
 #loginOverlay {
   position:fixed; inset:0; background:#000;
@@ -54,7 +50,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 
 let rowId = null;
 let linkId = null;
@@ -106,55 +102,48 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ONESIGNAL INIT WITH BELL HOOK */
+/* ONESIGNAL INIT WITH IMMEDIATE SUPABASE UPDATE */
 function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function(OneSignal) {
     await OneSignal.init({
-      appId:"2b94ad70-2518-44d4-aaef-bfb95739206f",
-      path:"/signals/",
-      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton:{ enable:true } // bell visible
+      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+      path: "/signals/",
+      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+      notifyButton: { enable: true }
     });
 
-    // Listen for subscription changes
-    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-      if (!event.current?.optedIn) return;
+    // 1️⃣ Ensure user is subscribed
+    const isSubscribed = await OneSignal.isPushNotificationsEnabled();
+    if (!isSubscribed) await OneSignal.registerForPushNotifications();
 
-      const rowIdLocal = localStorage.getItem("rowId");
-      const linkIdLocal = localStorage.getItem("linkId");
-      if (!rowIdLocal) return;
+    // 2️⃣ Set external ID and fetch player ID
+    const rowIdLocal = localStorage.getItem("rowId");
+    if (!rowIdLocal) return;
+    await OneSignal.login(rowIdLocal);          // sets external_id
+    const playerId = await OneSignal.getUserId();  // fetches OneSignal ID
+    if (!playerId) { console.error("Failed to get OneSignal player ID"); return; }
 
-      try {
-        // 1️⃣ Set External ID = rowId
-        await OneSignal.login(rowIdLocal);
+    console.log("OneSignal player ID:", playerId);
 
-        // 2️⃣ Get OneSignal ID (playerId)
-        const playerId = await OneSignal.getUserId();
-
-        // 3️⃣ Save to Supabase users table
-        await fetch(REGISTER_URL, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,        // matches users.row_id
-            linkId: linkIdLocal,      // optional tracking
-            one_signal_id: playerId,  // save OneSignal ID
-            device_type: deviceType   // save device type
-          })
-        });
-
-        console.log("Saved OneSignal ID for user:", rowIdLocal, playerId);
-
-      } catch(err) {
-        console.error("Error saving OneSignal ID:", err);
-      }
-    });
+    // 3️⃣ Save to Supabase
+    fetch(REGISTER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rowId: rowIdLocal,
+        linkId: localStorage.getItem("linkId"),
+        one_signal_id: playerId,
+        device_type: deviceType
+      })
+    })
+    .then(res => res.json())
+    .then(console.log)
+    .catch(console.error);
   });
 }
 </script>
 
 </body>
 </html>
-
