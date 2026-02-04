@@ -162,44 +162,46 @@ function initOneSignal() {
     const linkIdLocal = localStorage.getItem("linkId");
     if (!rowIdLocal) return;
 
-    // 🔔 THIS is when the player ACTUALLY exists
+    // Wait until user subscribes
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
 
-      try {
-        // 1️⃣ Attach external_id
-        await OneSignal.login(rowIdLocal);
+      // 1️⃣ Set external_id
+      await OneSignal.login(rowIdLocal);
 
-        // 2️⃣ Guaranteed OneSignal player ID
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) {
-          console.error("OneSignal ID missing");
-          return;
-        }
-
-        console.log("✅ OneSignal ID:", oneSignalId);
-
-        // 3️⃣ Save to Supabase
-        const res = await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
-          })
-        });
-
-        const json = await res.json();
-        console.log("✅ Supabase response:", json);
-
-      } catch (err) {
-        console.error("❌ OneSignal sync error:", err);
+      // 2️⃣ WAIT for OneSignal ID (this is the missing piece)
+      let oneSignalId = null;
+      for (let i = 0; i < 10; i++) {
+        oneSignalId = await OneSignal.User.getOnesignalId();
+        if (oneSignalId) break;
+        await new Promise(r => setTimeout(r, 500));
       }
+
+      if (!oneSignalId) {
+        console.error("❌ OneSignal ID never became available");
+        return;
+      }
+
+      console.log("✅ OneSignal ID confirmed:", oneSignalId);
+
+      // 3️⃣ Save to Supabase
+      fetch("https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId: rowIdLocal,
+          linkId: linkIdLocal,
+          one_signal_id: oneSignalId,
+          device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web"
+        })
+      })
+      .then(res => res.json())
+      .then(console.log)
+      .catch(console.error);
     });
   });
 }
+
 </script>
 
 </body>
