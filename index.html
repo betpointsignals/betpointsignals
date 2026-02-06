@@ -163,51 +163,47 @@ function initOneSignal() {
     const linkIdLocal = localStorage.getItem("linkId");
     if (!rowIdLocal) return;
 
+    // 🔑 Always store the current player ID in Supabase
+    const storeCurrentPlayerId = async () => {
+      const playerId = await OneSignal.User.getId();
+      const isSubscribed = await OneSignal.User.pushSubscription.getOptedIn();
+
+      if (!isSubscribed || !playerId) return;
+
+      // Clear previous sessions on other devices
+      await fetch(CLEAR_PREVIOUS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId: rowIdLocal,
+          currentPlayerId: playerId
+        })
+      });
+
+      // Register or update this device in Supabase
+      const res = await fetch(REGISTER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId: rowIdLocal,
+          one_signal_id: playerId,
+          device_type: deviceType
+        })
+      });
+
+      const json = await res.json();
+      console.log("✅ Supabase response:", json);
+    };
+
+    // Run immediately on init
+    await storeCurrentPlayerId();
+
     // 🔔 Listen when subscription changes (user clicks bell)
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
-
-      try {
-        // 1️⃣ Attach external_user_id to this device
-        await OneSignal.login(rowIdLocal);
-
-        // 2️⃣ Get OneSignal Player ID for this device
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) {
-          console.error("OneSignal ID missing");
-          return;
-        }
-        console.log("✅ OneSignal ID:", oneSignalId);
-
-        // 3️⃣ Clear external_user_id on previous devices
-        await fetch(CLEAR_PREVIOUS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            currentPlayerId: oneSignalId
-          })
-        });
-
-        // 4️⃣ Register this device in Supabase
-        const res = await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
-          })
-        });
-
-        const json = await res.json();
-        console.log("✅ Supabase response:", json);
-
-      } catch (err) {
-        console.error("❌ OneSignal sync error:", err);
-      }
+      await storeCurrentPlayerId();
     });
+
   });
 }
 </script>
