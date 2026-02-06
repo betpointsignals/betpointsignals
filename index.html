@@ -70,18 +70,13 @@ iframe {
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL =
-  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const VERIFY_URL = "https://your-supabase/functions/v1/verify-link";
+const LOGIN_URL = "https://your-supabase/functions/v1/login-update";
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
-const HEARTBEAT_URL =
-  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
-
-const APP_URL =
-  "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-
-let externalId = null;
+/* ================= STATE ================= */
+let externalId = null;   // password used as ID
 let playerId = null;
-let heartbeatInterval = null;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener("DOMContentLoaded", async () => {
@@ -96,10 +91,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function submitPassword() {
   const error = document.getElementById("loginError");
   const password = document.getElementById("passwordInput").value.trim();
-
   if (!password) return;
+
   error.textContent = "";
 
+  // Verify password
   const res = await fetch(VERIFY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -107,7 +103,6 @@ async function submitPassword() {
   });
 
   const data = await res.json();
-
   if (!data.valid) {
     error.textContent = "Invalid password";
     return;
@@ -126,20 +121,10 @@ function unlockApp() {
   document.getElementById("appFrame").src = APP_URL;
 }
 
-async function forceLogout() {
-  // Stop heartbeat polling
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-
-  // Unsubscribe from OneSignal to stop notifications
-  if (OneSignal) await OneSignal.logout();
-
+function forceLogout() {
   localStorage.removeItem("external_id");
   externalId = null;
   playerId = null;
-
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
@@ -156,40 +141,33 @@ async function initOneSignal(externalId) {
       });
 
       await OneSignal.login(externalId);
-
       playerId = await OneSignal.User.getId();
       if (!playerId) return;
 
-      // Immediate heartbeat
-      await heartbeat();
-
-      // Poll heartbeat every 15s
-      heartbeatInterval = setInterval(heartbeat, 15000);
+      // Immediately register this player and kick old one
+      await registerCurrentDevice(externalId, playerId);
 
       resolve();
     });
   });
 }
 
-/* ================= HEARTBEAT ================= */
-async function heartbeat() {
+/* ================= IMMEDIATE KICK ================= */
+async function registerCurrentDevice(row_id, newPlayerId) {
   try {
-    const res = await fetch(HEARTBEAT_URL, {
+    const res = await fetch(LOGIN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: externalId, player_id: playerId })
+      body: JSON.stringify({ row_id, player_id: newPlayerId })
     });
 
     const data = await res.json();
-
-    // If server says this device is not allowed, logout immediately
-    if (!data.allowed) {
-      console.warn("⛔ Logged out: newer device detected");
-      forceLogout();
+    // If server reports old device should logout, force it here
+    if (data.kick_old_device) {
+      console.warn("⛔ Previous device kicked");
     }
-
   } catch (e) {
-    console.warn("Heartbeat failed", e);
+    console.error("Error registering device", e);
   }
 }
 </script>
