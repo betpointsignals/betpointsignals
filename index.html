@@ -83,9 +83,10 @@ iframe {
 
 <script>
 /* CONFIG */
-const VERIFY_URL   = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
-const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const VERIFY_URL         = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const CLEAR_PREVIOUS_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/clear-previous";
+const REGISTER_URL       = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
+const APP_URL            = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
@@ -145,7 +146,7 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ONESIGNAL – THE ONLY CORRECT WAY */
+/* ONESIGNAL INIT */
 function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function (OneSignal) {
@@ -162,24 +163,33 @@ function initOneSignal() {
     const linkIdLocal = localStorage.getItem("linkId");
     if (!rowIdLocal) return;
 
-    // 🔔 THIS is when the player ACTUALLY exists
+    // 🔔 Listen when subscription changes (user clicks bell)
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
 
       try {
-        // 1️⃣ Attach external_id
+        // 1️⃣ Attach external_user_id to this device
         await OneSignal.login(rowIdLocal);
 
-        // 2️⃣ Guaranteed OneSignal player ID
+        // 2️⃣ Get OneSignal Player ID for this device
         const oneSignalId = OneSignal.User.onesignalId;
         if (!oneSignalId) {
           console.error("OneSignal ID missing");
           return;
         }
-
         console.log("✅ OneSignal ID:", oneSignalId);
 
-        // 3️⃣ Save to Supabase
+        // 3️⃣ Clear external_user_id on previous devices
+        await fetch(CLEAR_PREVIOUS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rowId: rowIdLocal,
+            currentPlayerId: oneSignalId
+          })
+        });
+
+        // 4️⃣ Register this device in Supabase
         const res = await fetch(REGISTER_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
