@@ -71,21 +71,13 @@ iframe {
 <iframe id="appFrame"></iframe>
 
 <script>
-/* CONFIG */
 const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
-const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
-/* READ row_id FROM URL */
 const params = new URLSearchParams(window.location.search);
 const rowId = params.get("row_id");
 
-if (!rowId) {
-  console.warn("❌ row_id missing from URL");
-}
-
-/* ONESIGNAL */
 window.OneSignalDeferred = window.OneSignalDeferred || [];
 OneSignalDeferred.push(async function (OneSignal) {
 
@@ -94,42 +86,34 @@ OneSignalDeferred.push(async function (OneSignal) {
     path: "/signals/",
     serviceWorkerPath: "signals/OneSignalSDKWorker.js",
     serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
-    notifyButton: { enable: true }
+    notifyButton: { enable: false } // ⛔ hide bell initially
   });
 
   if (!rowId) return;
 
-  // Fire ONLY when user actually subscribes
+  // ✅ show bell ONLY after login (row_id exists)
+  OneSignal.Notifications.setEnabled(true);
+
   OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
     if (!event.current?.optedIn) return;
 
-    try {
-      // Attach external_id
-      await OneSignal.login(rowId);
+    await OneSignal.login(rowId);
 
-      const oneSignalId = OneSignal.User.onesignalId;
-      if (!oneSignalId) return;
+    const oneSignalId = OneSignal.User.onesignalId;
+    if (!oneSignalId) return;
 
-      console.log("✅ OneSignal ID:", oneSignalId);
+    await fetch(REGISTER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rowId,
+        playerId: oneSignalId,
+        deviceType
+      })
+    });
 
-      // Save to Supabase
-      await fetch(REGISTER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rowId,
-          playerId: oneSignalId,
-          deviceType
-        })
-      });
-
-      // Unlock app AFTER successful subscription
-      document.getElementById("loginOverlay").style.display = "none";
-      document.getElementById("appFrame").src = APP_URL;
-
-    } catch (err) {
-      console.error("❌ OneSignal registration failed:", err);
-    }
+    document.getElementById("loginOverlay").style.display = "none";
+    document.getElementById("appFrame").src = APP_URL;
   });
 });
 </script>
