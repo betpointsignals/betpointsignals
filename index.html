@@ -5,27 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signal Alerts — Bet Point</title>
 
-<!-- PWA -->
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#007bff">
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
-<!-- OneSignal SDK -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
 html, body {
   margin:0;
   height:100%;
-  width:100%;
-  font-family:Arial,sans-serif;
   background:#000;
+  font-family:Arial,sans-serif;
 }
 iframe {
   width:100%;
   height:100%;
   border:none;
-  display:block;
 }
 #loginOverlay {
   position:fixed;
@@ -35,13 +31,8 @@ iframe {
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:999;
   color:#fff;
-}
-#loginOverlay img {
-  width:96px;
-  height:96px;
-  margin-bottom:16px;
+  z-index:999;
 }
 #loginOverlay input {
   padding:12px;
@@ -58,53 +49,40 @@ iframe {
   border:none;
   background:#007bff;
   color:#fff;
-  cursor:pointer;
 }
-#loginError {
-  color:#ff4d4d;
-  margin-top:12px;
-}
+#loginError { color:#ff4d4d; margin-top:12px; }
 </style>
 </head>
 
 <body>
 
-<!-- LOGIN -->
 <div id="loginOverlay">
-  <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
   <input type="password" id="rowIdInput" placeholder="Password">
   <button onclick="submitRowId()">Submit</button>
   <div id="loginError"></div>
 </div>
 
-<!-- APP -->
 <iframe id="appFrame"></iframe>
 
 <script>
-/* CONFIG */
 const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const HEARTBEAT_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
 const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
-const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
-
 let rowId = null;
-let linkId = null;
+let playerId = null;
 
-/* AUTO LOGIN */
+/* ---------- AUTO LOGIN ---------- */
 window.addEventListener("DOMContentLoaded", async () => {
-  const savedRow = localStorage.getItem("rowId");
-  const savedLink = localStorage.getItem("linkId");
-
-  if (savedRow && savedLink) {
-    rowId = savedRow;
-    linkId = savedLink;
+  rowId = localStorage.getItem("rowId");
+  if (rowId) {
     unlockApp();
     await initOneSignal();
   }
 });
 
-/* LOGIN */
+/* ---------- LOGIN ---------- */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   rowId = document.getElementById("rowIdInput").value.trim();
@@ -112,45 +90,36 @@ async function submitRowId() {
 
   error.textContent = "";
 
-  try {
-    const res = await fetch(VERIFY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId })
-    });
+  const res = await fetch(VERIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ row_id: rowId })
+  });
 
-    const data = await res.json();
-    if (!data.valid) {
-      error.textContent = "Invalid password";
-      return;
-    }
-
-    linkId = data.link_id;
-    localStorage.setItem("rowId", rowId);
-    localStorage.setItem("linkId", linkId);
-
-    unlockApp();
-    await initOneSignal();
-
-  } catch {
-    error.textContent = "Server error";
+  const data = await res.json();
+  if (!data.valid) {
+    error.textContent = "Invalid password";
+    return;
   }
+
+  localStorage.setItem("rowId", rowId);
+  unlockApp();
+  await initOneSignal();
 }
 
-/* UNLOCK APP */
+/* ---------- UI ---------- */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
-  const frame = document.getElementById("appFrame");
-  if (!frame.src) frame.src = APP_URL;
+  document.getElementById("appFrame").src = APP_URL;
 }
 
-/* SHOW LOGIN */
-function showLogin() {
-  document.getElementById("loginOverlay").style.display = "flex";
+function forceLogout() {
+  localStorage.clear();
   document.getElementById("appFrame").src = "";
+  document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ONESIGNAL INIT */
+/* ---------- ONESIGNAL ---------- */
 async function initOneSignal() {
   return new Promise((resolve) => {
     window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -158,42 +127,46 @@ async function initOneSignal() {
 
       await OneSignal.init({
         appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-        path: "/signals/",
-        serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-        serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
         notifyButton: { enable: true }
       });
 
-      const rowIdLocal = localStorage.getItem("rowId");
-      if (!rowIdLocal) return;
+      // 🔑 Attach external user id
+      await OneSignal.login(rowId);
 
-      // 🔑 Store current player ID locally and enforce login if changed
-      const storeAndCheckPlayer = async () => {
-        const playerId = await OneSignal.User.getId();
-        const isSubscribed = await OneSignal.User.pushSubscription.getOptedIn();
+      playerId = await OneSignal.User.getId();
+      if (!playerId) return;
 
-        if (!isSubscribed || !playerId) return;
+      // Register device as latest
+      await heartbeat();
 
-        const savedPlayerId = localStorage.getItem("playerId");
-        if (savedPlayerId && savedPlayerId !== playerId) {
-          console.log("⚠ Player ID changed externally. Showing login.");
-          showLogin();
-          return;
-        }
-
-        localStorage.setItem("playerId", playerId);
-      };
-
-      await storeAndCheckPlayer();
-
-      // 🔔 Listen for subscription changes
-      OneSignal.User.PushSubscription.addEventListener("change", async () => {
-        await storeAndCheckPlayer();
-      });
+      // Check every 15s if still allowed
+      setInterval(heartbeat, 15000);
 
       resolve();
     });
   });
+}
+
+/* ---------- SERVER AUTH CHECK ---------- */
+async function heartbeat() {
+  try {
+    const res = await fetch(HEARTBEAT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        row_id: rowId,
+        player_id: playerId
+      })
+    });
+
+    const data = await res.json();
+    if (!data.allowed) {
+      console.warn("⛔ Logged out: newer device detected");
+      forceLogout();
+    }
+  } catch {
+    console.warn("Heartbeat failed");
+  }
 }
 </script>
 
