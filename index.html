@@ -23,7 +23,7 @@ iframe {
   height: 100%;
   border: none;
 }
-#loginOverlay {
+#loginOverlay, #logoutOverlay {
   position: fixed;
   inset: 0;
   background: #000;
@@ -34,25 +34,23 @@ iframe {
   color: #fff;
   z-index: 999;
 }
-#loginOverlay input {
+#loginOverlay input, #loginOverlay button {
   padding: 12px;
   font-size: 16px;
-  width: 220px;
   border-radius: 6px;
   border: none;
   margin-bottom: 12px;
 }
-#loginOverlay button {
-  padding: 12px 18px;
-  font-size: 16px;
-  border-radius: 6px;
-  border: none;
-  background: #007bff;
-  color: #fff;
-}
-#loginError {
+#loginOverlay input { width: 220px; }
+#loginOverlay button { background: #007bff; color: #fff; }
+#loginError, #logoutMessage {
   color: #ff4d4d;
   margin-top: 12px;
+  text-align: center;
+}
+#logoutOverlay img {
+  width: 120px;
+  margin-bottom: 20px;
 }
 </style>
 </head>
@@ -67,21 +65,22 @@ iframe {
   <div id="loginError"></div>
 </div>
 
+<!-- AUTO LOGOUT OVERLAY -->
+<div id="logoutOverlay" style="display:none;">
+  <img src="./icon-1024x1024.png" alt="Logo" />
+  <div id="logoutMessage">You have been logged out because this account was logged in elsewhere.</div>
+</div>
+
 <iframe id="appFrame"></iframe>
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL =
-  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-
-const HEARTBEAT_URL =
-  "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
-
-const APP_URL =
-  "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const VERIFY_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const HEARTBEAT_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat";
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
 /* ================= STATE ================= */
-let externalId = null;   // 🔑 THIS IS THE PASSWORD
+let externalId = null;   // 🔑 password = external user id
 let playerId = null;
 let heartbeatInterval = null;
 
@@ -98,7 +97,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 async function submitPassword() {
   const error = document.getElementById("loginError");
   const password = document.getElementById("passwordInput").value.trim();
-
   if (!password) return;
 
   error.textContent = "";
@@ -110,13 +108,11 @@ async function submitPassword() {
   });
 
   const data = await res.json();
-
   if (!data.valid) {
     error.textContent = "Invalid password";
     return;
   }
 
-  // 🔑 PASSWORD IS STORED + USED AS EXTERNAL USER ID
   externalId = password;
   localStorage.setItem("external_id", externalId);
 
@@ -127,6 +123,7 @@ async function submitPassword() {
 /* ================= UI ================= */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
+  document.getElementById("logoutOverlay").style.display = "none";
   document.getElementById("appFrame").src = APP_URL;
 }
 
@@ -135,14 +132,14 @@ function forceLogout() {
   externalId = null;
   playerId = null;
 
-  // Clear heartbeat interval if exists
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
 
   document.getElementById("appFrame").src = "";
-  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("loginOverlay").style.display = "none";
+  document.getElementById("logoutOverlay").style.display = "flex";
 }
 
 /* ================= ONESIGNAL ================= */
@@ -156,17 +153,16 @@ async function initOneSignal(externalId) {
         notifyButton: { enable: true }
       });
 
-      // 🔑 THIS IS THE CRITICAL LINE
-      // PASSWORD === EXTERNAL USER ID
+      // LOGIN with external ID (password)
       await OneSignal.login(externalId);
 
       playerId = await OneSignal.User.getId();
       if (!playerId) return;
 
-      // Immediate registration
+      // 🔴 Immediate heartbeat on login
       await heartbeat();
 
-      // Re-check every 15 seconds
+      // 🔴 Keep checking every 15s in case session changes again
       heartbeatInterval = setInterval(heartbeat, 15000);
 
       resolve();
@@ -180,14 +176,12 @@ async function heartbeat() {
     const res = await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        row_id: externalId,
-        player_id: playerId
-      })
+      body: JSON.stringify({ row_id: externalId, player_id: playerId })
     });
 
     const data = await res.json();
 
+    // 🔴 Kick immediately if not allowed
     if (!data.allowed) {
       console.warn("⛔ Logged out: newer device detected");
       forceLogout();
