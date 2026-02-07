@@ -101,14 +101,15 @@ const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/regi
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
+const HEARTBEAT_MS = 10000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
 let pollTimer = null;
-let gracePeriod = false;
 let heartbeatTimer = null;
+let gracePeriod = false;
 
 /* ================= HEARTBEAT ================= */
 function startHeartbeat() {
@@ -116,19 +117,18 @@ function startHeartbeat() {
 
   heartbeatTimer = setInterval(() => {
     if (document.visibilityState !== 'visible') return;
+    if (!rowId) return;
 
     window.OneSignalDeferred?.push(async function(OneSignal) {
       try {
-        await OneSignal.User.addTag(
-          "heartbeat",
-          Date.now().toString()
-        );
-        console.log("🫀 OneSignal heartbeat");
+        // 🔥 SAME as first login — refreshes session + last_active
+        await OneSignal.login(rowId);
+        console.log("🫀 OneSignal session refreshed");
       } catch (e) {
         console.warn("Heartbeat failed", e);
       }
     });
-  }, 10000); // every 10 seconds
+  }, HEARTBEAT_MS);
 }
 
 function stopHeartbeat() {
@@ -153,12 +153,8 @@ function setAuthState(isAuthed, reason = null) {
 
   if (isAuthed) {
     overlay.style.display = 'none';
-
-    frame.onload = null;
     frame.src = APP_URL;
-
     startHeartbeat();
-
   } else {
     console.warn("⛔ Auth revoked:", reason);
 
@@ -170,9 +166,7 @@ function setAuthState(isAuthed, reason = null) {
 
     stopHeartbeat();
 
-    frame.onload = null;
     frame.src = 'about:blank';
-
     overlay.style.display = 'flex';
   }
 }
@@ -247,6 +241,7 @@ function initOneSignal(rowId) {
     });
 
     try {
+      // 🔑 initial login
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
 
@@ -263,7 +258,7 @@ function initOneSignal(rowId) {
 
       startHeartbeat();
 
-      console.log("OneSignal registered:", rowId, playerId);
+      console.log("OneSignal initialized:", rowId, playerId);
     } catch(err) {
       console.error("OneSignal error:", err);
     }
