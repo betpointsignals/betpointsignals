@@ -104,18 +104,28 @@ async function submitRowId() {
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
   const frame = document.getElementById("appFrame");
-  if (!frame.src) frame.src = APP_URL;
+  frame.src = APP_URL; // always reload iframe
 }
 
 function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason);
+
   localStorage.removeItem("rowId");
+  document.getElementById("rowIdInput").value = ""; // clear input
 
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
 
-  document.getElementById("appFrame").src = "";
+  const frame = document.getElementById("appFrame");
+  frame.src = ""; // reset iframe
+
   document.getElementById("loginOverlay").style.display = "flex";
+
+  // reset OneSignal to re-init
+  if (window.OneSignal) {
+    window.OneSignal = undefined;
+    window.OneSignalDeferred = [];
+  }
 }
 
 /* ================= ONESIGNAL ================= */
@@ -129,8 +139,8 @@ function initOneSignal(rowId) {
 
     const subscription = await OneSignal.User.getSubscription();
     if (subscription?.userId) {
-      // Register this device with your backend if needed
       console.log("OneSignal player_id:", subscription.userId);
+      // you can register this player_id to backend if needed
     }
   });
 }
