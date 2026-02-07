@@ -85,18 +85,18 @@ const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a4387
 const CHECK_LAST4 = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
 const POLL_MS = 15000; // 15 seconds
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
-const REGISTER_URL = "https://your-backend/register-player"; // replace with your actual register endpoint
 
 let pollTimer = null;
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
+  const error = document.getElementById("loginError");
   const rowIdInput = document.getElementById("rowIdInput").value.trim();
   if (!rowIdInput) return;
-  
+
   localStorage.setItem("rowId", rowIdInput);
   unlockApp();
-  await initOneSignal(rowIdInput); // await to ensure registration happens before polling
+  initOneSignal(rowIdInput);
   startPolling();
 }
 
@@ -119,36 +119,32 @@ function forceLogout(reason) {
 }
 
 /* ================= ONESIGNAL ================= */
-async function initOneSignal(rowId) {
+function initOneSignal(rowId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
-  return new Promise(resolve => {
-    OneSignalDeferred.push(async function(OneSignal) {
-      await OneSignal.init({
-        appId: ONESIGNAL_APP_ID,
-        notifyButton: { enable: true }
-      });
-
-      // Force refresh subscription to ensure latest player_id is captured
-      await OneSignal.User.setSubscription(false);
-      await OneSignal.User.setSubscription(true);
-
-      const subscription = await OneSignal.User.getSubscription();
-      if (subscription?.userId) {
-        console.log("OneSignal player_id:", subscription.userId);
-
-        // Always register current player_id to backend
-        await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId,
-            player_id: subscription.userId,
-            device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web"
-          })
-        });
-      }
-      resolve();
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: ONESIGNAL_APP_ID,
+      notifyButton: { enable: true }
     });
+
+    const subscription = await OneSignal.User.getSubscription();
+    if (subscription?.userId) {
+      console.log("OneSignal player_id:", subscription.userId);
+
+      // Set external_id so this player is linked to rowId
+      await OneSignal.User.setExternalUserId(rowId);
+
+      // Register the player_id to your backend (optional)
+      await fetch("https://your-backend/register-device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId,
+          player_id: subscription.userId,
+          device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web"
+        })
+      });
+    }
   });
 }
 
@@ -183,11 +179,11 @@ function startPolling() {
 }
 
 /* ================= AUTO START ================= */
-window.addEventListener("DOMContentLoaded", async () => {
+window.addEventListener("DOMContentLoaded", () => {
   const rowId = localStorage.getItem("rowId");
   if (rowId) {
     unlockApp();
-    await initOneSignal(rowId);
+    initOneSignal(rowId);
     startPolling();
   }
 });
