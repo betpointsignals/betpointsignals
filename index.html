@@ -127,24 +127,21 @@ function initOneSignal(rowId) {
       notifyButton: { enable: true }
     });
 
+    // Set external_id if already subscribed
     const subscription = await OneSignal.User.getSubscription();
     if (subscription?.userId) {
-      console.log("OneSignal player_id:", subscription.userId);
-
-      // Set external_id so this player is linked to rowId
       await OneSignal.User.setExternalUserId(rowId);
-
-      // Register the player_id to your backend (optional)
-      await fetch("https://your-backend/register-device", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rowId,
-          player_id: subscription.userId,
-          device_type: /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web"
-        })
-      });
+      console.log("OneSignal external_id set for existing subscription:", rowId);
     }
+
+    // Listen for new subscription (user clicks bell)
+    OneSignal.User.pushSubscription.addEventListener(async (event) => {
+      if (event.current?.optedIn) {
+        const playerId = OneSignal.User.onesignalId;
+        await OneSignal.User.setExternalUserId(rowId);
+        console.log("User subscribed, external_id set:", rowId);
+      }
+    });
   });
 }
 
