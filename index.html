@@ -41,50 +41,18 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const VERIFY_URL   = 'https://your-supabase.functions/v1/verify-link';
+const REGISTER_URL = 'https://your-supabase.functions/v1/register-device';
+const CHECK_LAST4  = 'https://your-supabase.functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
-const HEARTBEAT_MS = 10000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
-let heartbeatTimer = null;
 let gracePeriod = false;
-
-/* ================= HEARTBEAT ================= */
-function startHeartbeat() {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (document.visibilityState !== 'visible') return;
-    if (!rowId || !loginCode) return;
-
-    window.OneSignalDeferred?.push(async function(OneSignal) {
-      try {
-        await OneSignal.login(rowId);
-        console.log("🫀 OneSignal heartbeat refreshed");
-      } catch (e) {
-        console.warn("Heartbeat failed", e);
-      }
-    });
-  }, HEARTBEAT_MS);
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-}
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") startHeartbeat();
-  else stopHeartbeat();
-});
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -92,21 +60,14 @@ function setAuthState(isAuthed, reason = null) {
   const frame = document.getElementById('appFrame');
 
   if (isAuthed) {
-    console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
-    startHeartbeat();
+    console.log("✅ Auth successful");
   } else {
     console.warn("⛔ Auth revoked:", reason);
-
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
-
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = null;
-
-    stopHeartbeat();
-
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
   }
@@ -116,12 +77,9 @@ function setAuthState(isAuthed, reason = null) {
 window.addEventListener('DOMContentLoaded', () => {
   const savedRow = localStorage.getItem('rowId');
   const savedCode = localStorage.getItem('loginCode');
-
   if (savedRow && savedCode) {
-    console.log("🔄 Found saved credentials", { savedRow, savedCode });
     rowId = savedRow;
     loginCode = savedCode;
-
     setAuthState(true);
     initOneSignal(rowId);
     startPolling();
@@ -138,38 +96,44 @@ async function submitRowId() {
   error.textContent = '';
   spinner.style.display = 'block';
 
-  loginCode = crypto.randomUUID();
-
   try {
-    console.log("🔑 Attempting login with", { rowId, loginCode });
-
+    // Call verify-link function: it inserts rowId into login table and generates code in DB trigger
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ row_id: rowId, code: loginCode })
+      body: JSON.stringify({ row_id: rowId })
     });
-
     const data = await res.json();
-    console.log("Login response:", data);
-
     if (!data.valid) {
       error.textContent = 'Login failed';
-      console.warn("❌ Login failed", data);
+      spinner.style.display = 'none';
       return;
     }
 
+    // Wait a moment and fetch latest code from login table via checklast4
+    const codeRes = await fetch(CHECK_LAST4, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ row_id: rowId, code: "" }) // empty code, backend returns latest
+    });
+    const codeData = await codeRes.json();
+    if (!codeData.valid) {
+      error.textContent = 'Login failed';
+      spinner.style.display = 'none';
+      return;
+    }
+
+    loginCode = codeData.code; // store the latest code from backend
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
     setAuthState(true);
     initOneSignal(rowId);
-
     gracePeriod = true;
     setTimeout(() => gracePeriod = false, 4000);
-
     startPolling();
 
-  } catch (err) {
+  } catch(err) {
     console.error("Login exception:", err);
     error.textContent = 'Server error';
   } finally {
@@ -192,8 +156,6 @@ function initOneSignal(rowId) {
     try {
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
-      console.log("🎯 OneSignal playerId:", playerId);
-
       await fetch(REGISTER_URL, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
@@ -204,10 +166,7 @@ function initOneSignal(rowId) {
           device_type: deviceType
         })
       });
-
-      startHeartbeat();
       console.log("✅ OneSignal initialized", { rowId, playerId });
-
     } catch(err) {
       console.error("OneSignal error:", err);
     }
@@ -220,43 +179,22 @@ function startPolling() {
 
   const pollFn = async () => {
     if (gracePeriod) return;
-    if (!rowId || !loginCode) {
-      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
-      return;
-    }
+    if (!rowId || !loginCode) return;
 
     try {
-      console.log("Polling checklast4 with:", { rowId, loginCode });
-
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Polling fetch error:", res.status, text);
-        return;
-      }
-
       const data = await res.json();
-      console.log("Polling response:", data);
-
-      if (!data.valid) {
-        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
-        setAuthState(false, data.error || "Logged in on another device");
-      }
-
+      if (!data.valid) setAuthState(false, data.error || "Logged in on another device");
     } catch(err) {
       console.error("Polling exception:", err);
     }
   };
 
-  // 🔹 First poll immediately
-  pollFn();
-
-  // 🔹 Then start interval
+  pollFn(); // first immediate check
   pollTimer = setInterval(pollFn, POLL_MS);
 }
 </script>
