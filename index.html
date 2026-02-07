@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signal Alerts — Bet Point</title>
 
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#007bff">
+<link rel="apple-touch-icon" href="./icon-1024x1024.png">
+
 <style>
 html, body {
   margin:0;
@@ -58,6 +62,7 @@ iframe {
 }
 </style>
 </head>
+
 <body>
 
 <!-- LOGIN -->
@@ -73,19 +78,18 @@ iframe {
 <iframe id="appFrame"></iframe>
 
 <script>
-/* ================= CONFIG ================= */
 const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const CHECK_DB_URL = "https://YOUR_BACKEND/check-betpoint-multi"; // Replace with your backend URL
-const POLL_MS = 15000; // 15 seconds
+const POLL_MS = 15000; // poll every 15 seconds
+const CHECK_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
 
 let rowId = null;
 let pollTimer = null;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener("DOMContentLoaded", () => {
-  const r = localStorage.getItem("rowId");
-  if (r) {
-    rowId = r;
+  const storedRow = localStorage.getItem("rowId");
+  if (storedRow) {
+    rowId = storedRow;
     unlockApp();
     startPolling();
   }
@@ -93,30 +97,17 @@ window.addEventListener("DOMContentLoaded", () => {
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
-  const error = document.getElementById("loginError");
-  rowId = document.getElementById("rowIdInput").value.trim();
-  if (!rowId) return;
+  const errorEl = document.getElementById("loginError");
+  const input = document.getElementById("rowIdInput");
+  const value = input.value.trim();
+  if (!value) return;
 
-  error.textContent = "";
+  errorEl.textContent = "";
+  rowId = value;
+  localStorage.setItem("rowId", rowId);
 
-  try {
-    // Verify the password exists in your DB
-    const res = await fetch(`${CHECK_DB_URL}?row_id=${encodeURIComponent(rowId)}`);
-    const data = await res.json();
-
-    if (!data.valid) {
-      error.textContent = "Invalid password";
-      return;
-    }
-
-    localStorage.setItem("rowId", rowId);
-    unlockApp();
-    startPolling();
-
-  } catch (err) {
-    error.textContent = "Server error";
-    console.error(err);
-  }
+  unlockApp();
+  startPolling();
 }
 
 /* ================= UI ================= */
@@ -139,9 +130,10 @@ function forceLogout(reason) {
 
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("rowIdInput").value = "";
 }
 
-/* ================= HARD POLLING ================= */
+/* ================= POLLING ================= */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
@@ -149,15 +141,19 @@ function startPolling() {
     if (!rowId) return;
 
     try {
-      const res = await fetch(`${CHECK_DB_URL}?row_id=${encodeURIComponent(rowId)}`);
+      const res = await fetch(CHECK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ row_id: rowId })
+      });
+
       const data = await res.json();
 
-      // data.valid = true if last 4 player_ids are identical
       if (!data.valid) {
-        forceLogout("Detected multiple devices / player_id mismatch");
+        forceLogout("Detected multiple devices / player_id change");
       }
     } catch (err) {
-      console.error("Polling error", err);
+      console.error("Polling error:", err);
     }
   }, POLL_MS);
 }
