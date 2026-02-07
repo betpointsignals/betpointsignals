@@ -81,36 +81,22 @@ iframe {
 
 <script>
 /* ================= CONFIG ================= */
-const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const CHECK_LAST4  = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
-const POLL_MS      = 15000;
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const CHECK_LAST4 = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
+const POLL_MS = 15000; // 15 seconds
+const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
-let rowId = null;
-let playerId = null;
 let pollTimer = null;
-
-/* ================= AUTO LOGIN ================= */
-window.addEventListener("DOMContentLoaded", () => {
-  const storedRow = localStorage.getItem("rowId");
-  if (storedRow) {
-    rowId = storedRow;
-    unlockApp();
-    initOneSignal(rowId);
-    startPolling();
-  }
-});
 
 /* ================= LOGIN ================= */
 async function submitRowId() {
   const error = document.getElementById("loginError");
-  rowId = document.getElementById("rowIdInput").value.trim();
-  if (!rowId) return;
+  const rowIdInput = document.getElementById("rowIdInput").value.trim();
+  if (!rowIdInput) return;
 
-  error.textContent = "";
-  localStorage.setItem("rowId", rowId);
-
+  localStorage.setItem("rowId", rowIdInput);
   unlockApp();
-  initOneSignal(rowId);
+  initOneSignal(rowIdInput);
   startPolling();
 }
 
@@ -122,41 +108,30 @@ function unlockApp() {
 }
 
 function forceLogout(reason) {
-  console.warn("⛔ FORCE LOGOUT:", reason);
-
+  console.warn("⛔ KICKED:", reason);
   localStorage.removeItem("rowId");
-  rowId = null;
-  playerId = null;
 
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
 
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
 /* ================= ONESIGNAL ================= */
-function initOneSignal(rowIdLocal) {
-  window.OneSignalDeferred = [];
-  OneSignalDeferred.push(async function (OneSignal) {
+function initOneSignal(rowId) {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
     await OneSignal.init({
-      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+      appId: ONESIGNAL_APP_ID,
       notifyButton: { enable: true }
     });
 
-    // login user with external_id so player_id updates
-    await OneSignal.logout();
-    await OneSignal.login(rowIdLocal);
-
-    playerId = await OneSignal.User.getId();
-    if (!playerId) {
-      console.warn("No OneSignal player_id");
-      return;
+    const subscription = await OneSignal.User.getSubscription();
+    if (subscription?.userId) {
+      // Register this device with your backend if needed
+      console.log("OneSignal player_id:", subscription.userId);
     }
-
-    console.log("✅ OneSignal Player ID:", playerId);
   });
 }
 
@@ -165,22 +140,23 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   pollTimer = setInterval(async () => {
+    const rowId = localStorage.getItem("rowId");
     if (!rowId) return;
 
     try {
-      // Call edge function to get last 4 player_ids for this row_id
       const res = await fetch(CHECK_LAST4, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ row_id: rowId })
       });
 
+      if (!res.ok) return console.error("Poll fetch error:", res.statusText);
+
       const data = await res.json();
 
-      // If last 4 rows have more than 1 unique player_id → force logout
-      const uniqueIds = [...new Set(data.last4_player_ids)];
-      if (uniqueIds.length > 1) {
-        forceLogout("Multiple devices detected");
+      if (!data.valid) {
+        console.warn("Last 4 player IDs mismatch:", data.last4_player_ids);
+        forceLogout("Detected multiple devices or player_id change");
       }
 
     } catch (err) {
@@ -188,6 +164,16 @@ function startPolling() {
     }
   }, POLL_MS);
 }
+
+/* ================= AUTO START ================= */
+window.addEventListener("DOMContentLoaded", () => {
+  const rowId = localStorage.getItem("rowId");
+  if (rowId) {
+    unlockApp();
+    initOneSignal(rowId);
+    startPolling();
+  }
+});
 </script>
 
 </body>
