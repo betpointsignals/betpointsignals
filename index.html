@@ -65,7 +65,7 @@ function startHeartbeat() {
 
     window.OneSignalDeferred?.push(async function(OneSignal) {
       try {
-        await OneSignal.login(rowId); // refresh OneSignal session
+        await OneSignal.login(rowId);
         console.log("🫀 OneSignal heartbeat refreshed");
       } catch (e) {
         console.warn("Heartbeat failed", e);
@@ -136,7 +136,6 @@ async function submitRowId() {
   error.textContent = '';
   spinner.style.display = 'block';
 
-  // 🔑 generate unique code per login
   loginCode = crypto.randomUUID();
 
   try {
@@ -163,7 +162,8 @@ async function submitRowId() {
 
     startPolling();
 
-  } catch {
+  } catch (err) {
+    console.error("Login error:", err);
     error.textContent = 'Server error';
   } finally {
     spinner.style.display = 'none';
@@ -210,27 +210,44 @@ function initOneSignal(rowId) {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
-  pollTimer = setInterval(async () => {
+  const pollFn = async () => {
     if (gracePeriod) return;
-    if (!rowId || !loginCode) return;
+    if (!rowId || !loginCode) {
+      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
+      return;
+    }
 
     try {
+      console.log("Polling checklast4 with:", { rowId, loginCode });
+
       const res = await fetch(CHECK_LAST4, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Polling fetch error:", res.status, text);
+        return;
+      }
 
       const data = await res.json();
       if (!data.valid) {
-        setAuthState(false, "Logged in on another device");
+        console.warn("Auth invalid, logging out:", data.error || "Unknown reason");
+        setAuthState(false, data.error || "Logged in on another device");
       }
+
     } catch(err) {
-      console.error("Polling error:", err);
+      console.error("Polling exception:", err);
     }
-  }, POLL_MS);
+  };
+
+  // 🔹 First poll immediately
+  pollFn();
+
+  // 🔹 Then start interval
+  pollTimer = setInterval(pollFn, POLL_MS);
 }
 </script>
 </body>
