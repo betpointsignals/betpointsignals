@@ -1,176 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signal Alerts — Bet Point</title>
 
-<link rel="manifest" href="./manifest.json" />
-<meta name="theme-color" content="#007bff" />
-<link rel="apple-touch-icon" href="./icon-1024x1024.png" />
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#007bff">
+<link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
+<!-- OneSignal SDK -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
 html, body {
-  margin: 0;
-  height: 100%;
-  background: #000;
-  font-family: Arial, sans-serif;
+  margin:0;
+  height:100%;
+  width:100%;
+  font-family:Arial,sans-serif;
+  background:#000;
 }
 iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
+  width:100%;
+  height:100%;
+  border:none;
+  display:block;
 }
 #loginOverlay {
-  position: fixed;
-  inset: 0;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #fff;
-  z-index: 999;
+  position:fixed;
+  inset:0;
+  background:#000;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  z-index:999;
+  color:#fff;
+}
+#loginOverlay img {
+  width:96px;
+  height:96px;
+  margin-bottom:16px;
 }
 #loginOverlay input {
-  padding: 12px;
-  font-size: 16px;
-  width: 220px;
-  border-radius: 6px;
-  border: none;
-  margin-bottom: 12px;
+  padding:12px;
+  font-size:16px;
+  width:220px;
+  border-radius:6px;
+  border:none;
+  margin-bottom:12px;
 }
 #loginOverlay button {
-  padding: 12px 18px;
-  font-size: 16px;
-  border-radius: 6px;
-  border: none;
-  background: #007bff;
-  color: #fff;
+  padding:12px 18px;
+  font-size:16px;
+  border-radius:6px;
+  border:none;
+  background:#007bff;
+  color:#fff;
+  cursor:pointer;
 }
 #loginError {
-  color: #ff4d4d;
-  margin-top: 12px;
+  color:#ff4d4d;
+  margin-top:12px;
 }
 </style>
 </head>
 
 <body>
 
+<!-- LOGIN -->
 <div id="loginOverlay">
+  <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
-  <input type="password" id="passwordInput" placeholder="Password" />
-  <button onclick="submitPassword()">Submit</button>
+  <input type="password" id="rowIdInput" placeholder="Password">
+  <button onclick="submitRowId()">Submit</button>
   <div id="loginError"></div>
 </div>
 
+<!-- APP -->
 <iframe id="appFrame"></iframe>
 
 <script>
-/* ================= CONFIG ================= */
-const VERIFY_URL = "https://your-supabase/functions/v1/verify-link";
-const LOGIN_URL = "https://your-supabase/functions/v1/login-update";
-const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+/* CONFIG */
+const VERIFY_URL   = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
+const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
+const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
 
-/* ================= STATE ================= */
-let externalId = null;   // password used as ID
-let playerId = null;
+const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
-/* ================= AUTO LOGIN ================= */
-window.addEventListener("DOMContentLoaded", async () => {
-  externalId = localStorage.getItem("external_id");
-  if (externalId) {
+let rowId = null;
+let linkId = null;
+
+/* AUTO LOGIN */
+window.addEventListener("DOMContentLoaded", () => {
+  const savedRow = localStorage.getItem("rowId");
+  const savedLink = localStorage.getItem("linkId");
+
+  if (savedRow && savedLink) {
+    rowId = savedRow;
+    linkId = savedLink;
     unlockApp();
-    await initOneSignal(externalId);
+    initOneSignal();
   }
 });
 
-/* ================= LOGIN ================= */
-async function submitPassword() {
+/* LOGIN */
+async function submitRowId() {
   const error = document.getElementById("loginError");
-  const password = document.getElementById("passwordInput").value.trim();
-  if (!password) return;
+  rowId = document.getElementById("rowIdInput").value.trim();
+  if (!rowId) return;
 
   error.textContent = "";
 
-  // Verify password
-  const res = await fetch(VERIFY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ row_id: password })
-  });
-
-  const data = await res.json();
-  if (!data.valid) {
-    error.textContent = "Invalid password";
-    return;
-  }
-
-  externalId = password;
-  localStorage.setItem("external_id", externalId);
-
-  unlockApp();
-  await initOneSignal(externalId);
-}
-
-/* ================= UI ================= */
-function unlockApp() {
-  document.getElementById("loginOverlay").style.display = "none";
-  document.getElementById("appFrame").src = APP_URL;
-}
-
-function forceLogout() {
-  localStorage.removeItem("external_id");
-  externalId = null;
-  playerId = null;
-  document.getElementById("appFrame").src = "";
-  document.getElementById("loginOverlay").style.display = "flex";
-}
-
-/* ================= ONESIGNAL ================= */
-async function initOneSignal(externalId) {
-  return new Promise((resolve) => {
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function (OneSignal) {
-
-      await OneSignal.init({
-        appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-        notifyButton: { enable: true }
-      });
-
-      await OneSignal.login(externalId);
-      playerId = await OneSignal.User.getId();
-      if (!playerId) return;
-
-      // Immediately register this player and kick old one
-      await registerCurrentDevice(externalId, playerId);
-
-      resolve();
-    });
-  });
-}
-
-/* ================= IMMEDIATE KICK ================= */
-async function registerCurrentDevice(row_id, newPlayerId) {
   try {
-    const res = await fetch(LOGIN_URL, {
+    const res = await fetch(VERIFY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id, player_id: newPlayerId })
+      body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
-    // If server reports old device should logout, force it here
-    if (data.kick_old_device) {
-      console.warn("⛔ Previous device kicked");
+    if (!data.valid) {
+      error.textContent = "Invalid password";
+      return;
     }
-  } catch (e) {
-    console.error("Error registering device", e);
+
+    linkId = data.link_id;
+    localStorage.setItem("rowId", rowId);
+    localStorage.setItem("linkId", linkId);
+
+    unlockApp();
+    initOneSignal();
+
+  } catch {
+    error.textContent = "Server error";
   }
+}
+
+/* UNLOCK APP */
+function unlockApp() {
+  document.getElementById("loginOverlay").style.display = "none";
+  const frame = document.getElementById("appFrame");
+  if (!frame.src) frame.src = APP_URL;
+}
+
+/* ONESIGNAL – THE ONLY CORRECT WAY */
+function initOneSignal() {
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function (OneSignal) {
+
+    await OneSignal.init({
+      appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
+      path: "/signals/",
+      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+      notifyButton: { enable: true }
+    });
+
+    const rowIdLocal  = localStorage.getItem("rowId");
+    const linkIdLocal = localStorage.getItem("linkId");
+    if (!rowIdLocal) return;
+
+    // 🔔 THIS is when the player ACTUALLY exists
+    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
+      if (!event.current?.optedIn) return;
+
+      try {
+        // 1️⃣ Attach external_id
+        await OneSignal.login(rowIdLocal);
+
+        // 2️⃣ Guaranteed OneSignal player ID
+        const oneSignalId = OneSignal.User.onesignalId;
+        if (!oneSignalId) {
+          console.error("OneSignal ID missing");
+          return;
+        }
+
+        console.log("✅ OneSignal ID:", oneSignalId);
+
+        // 3️⃣ Save to Supabase
+        const res = await fetch(REGISTER_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rowId: rowIdLocal,
+            linkId: linkIdLocal,
+            one_signal_id: oneSignalId,
+            device_type: deviceType
+          })
+        });
+
+        const json = await res.json();
+        console.log("✅ Supabase response:", json);
+
+      } catch (err) {
+        console.error("❌ OneSignal sync error:", err);
+      }
+    });
+  });
 }
 </script>
 
 </body>
-</html> 
+</html> when its set clear any previous set external just clear the column dont delete
