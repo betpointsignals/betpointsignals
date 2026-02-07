@@ -12,29 +12,73 @@
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
-html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
-iframe { width:100%; height:100%; border:none; display:block; }
-#loginOverlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff; }
-#loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
-#loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
-#loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
-#loginError { color:#ff4d4d; margin-top:12px; }
+html, body {
+  margin:0;
+  height:100%;
+  width:100%;
+  font-family:Arial,sans-serif;
+  background:#000;
+}
+iframe {
+  width:100%;
+  height:100%;
+  border:none;
+  display:block;
+}
+#loginOverlay {
+  position:fixed;
+  inset:0;
+  background:#000;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  z-index:999;
+  color:#fff;
+}
+#loginOverlay img {
+  width:96px;
+  height:96px;
+  margin-bottom:16px;
+}
+#loginOverlay input {
+  padding:12px;
+  font-size:16px;
+  width:220px;
+  border-radius:6px;
+  border:none;
+  margin-bottom:12px;
+}
+#loginOverlay button {
+  padding:12px 18px;
+  font-size:16px;
+  border-radius:6px;
+  border:none;
+  background:#007bff;
+  color:#fff;
+  cursor:pointer;
+}
+#loginError {
+  color:#ff4d4d;
+  margin-top:12px;
+}
 #spinner {
-  border: 4px solid rgba(255, 255, 255, 0.2);
-  border-top: 4px solid #007bff;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  animation: spin 1s linear infinite;
+  border:4px solid rgba(255,255,255,0.2);
+  border-top:4px solid #007bff;
+  border-radius:50%;
+  width:36px;
+  height:36px;
+  animation:spin 1s linear infinite;
   margin-top:12px;
   display:none;
 }
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% { transform:rotate(0deg); }
+  100% { transform:rotate(360deg); }
 }
 </style>
 </head>
+
 <body>
 
 <!-- LOGIN -->
@@ -51,7 +95,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 <iframe id="appFrame"></iframe>
 
 <script>
-/* CONFIG */
+/* ================= CONFIG ================= */
 const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
@@ -65,14 +109,44 @@ let linkId = null;
 let pollTimer = null;
 let gracePeriod = false;
 
+/* ================= AUTH STATE ================= */
+function setAuthState(isAuthed, reason = null) {
+  const overlay = document.getElementById('loginOverlay');
+  const frame = document.getElementById('appFrame');
+
+  if (isAuthed) {
+    overlay.style.display = 'none';
+
+    // HARD reload iframe every time
+    frame.onload = null;
+    frame.src = APP_URL;
+
+  } else {
+    console.warn("⛔ Auth revoked:", reason);
+
+    localStorage.removeItem('rowId');
+    localStorage.removeItem('linkId');
+
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+
+    frame.onload = null;
+    frame.src = 'about:blank';
+
+    overlay.style.display = 'flex';
+  }
+}
+
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
   const savedRow = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
+
   if (savedRow && savedLink) {
     rowId = savedRow;
     linkId = savedLink;
-    unlockApp();
+
+    setAuthState(true);
     initOneSignal(rowId);
     startPolling();
   }
@@ -84,8 +158,9 @@ async function submitRowId() {
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
   if (!rowId) return;
+
   error.textContent = '';
-  spinner.style.display = 'block'; // show spinner
+  spinner.style.display = 'block';
 
   try {
     const res = await fetch(VERIFY_URL, {
@@ -93,11 +168,10 @@ async function submitRowId() {
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
-    const data = await res.json();
 
+    const data = await res.json();
     if (!data.valid) {
       error.textContent = 'Invalid password';
-      spinner.style.display = 'none';
       return;
     }
 
@@ -105,39 +179,23 @@ async function submitRowId() {
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
 
-    unlockApp();
+    setAuthState(true);
+
     initOneSignal(rowId);
 
-    // Grace period: prevent immediate kick
     gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, 4000);
+    setTimeout(() => gracePeriod = false, 4000);
 
     startPolling();
+
   } catch {
     error.textContent = 'Server error';
   } finally {
-    spinner.style.display = 'none'; // hide spinner
+    spinner.style.display = 'none';
   }
 }
 
-/* ================= UI ================= */
-function unlockApp() {
-  document.getElementById('loginOverlay').style.display = 'none';
-  const frame = document.getElementById('appFrame');
-  if (!frame.src) frame.src = APP_URL;
-}
-
-function forceLogout(reason) {
-  console.warn("⛔ KICKED:", reason);
-  localStorage.removeItem('rowId');
-  localStorage.removeItem('linkId');
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = null;
-  document.getElementById('appFrame').src = '';
-  document.getElementById('loginOverlay').style.display = 'flex';
-}
-
-/* ================= ONESIGNAL INIT ================= */
+/* ================= ONESIGNAL ================= */
 function initOneSignal(rowId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function(OneSignal) {
@@ -149,34 +207,34 @@ function initOneSignal(rowId) {
       notifyButton:{ enable:true }
     });
 
-    // Automatically set external ID
     try {
-      await OneSignal.login(rowId); // 🔑 Sets external_id = rowId
+      await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
 
-      // Save playerId to backend
       await fetch(REGISTER_URL, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
-          rowId: rowId,
-          linkId: linkId,
+          rowId,
+          linkId,
           one_signal_id: playerId,
           device_type: deviceType
         })
       });
-      console.log("External ID set and playerId saved:", rowId, playerId);
+
+      console.log("OneSignal registered:", rowId, playerId);
     } catch(err) {
-      console.error("Failed to set external ID:", err);
+      console.error("OneSignal error:", err);
     }
   });
 }
 
-/* ================= HARD KICK POLLING ================= */
+/* ================= POLLING ================= */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
+
   pollTimer = setInterval(async () => {
-    if (gracePeriod) return; // skip checking during grace period
+    if (gracePeriod) return;
 
     const rowIdLocal = localStorage.getItem('rowId');
     if (!rowIdLocal) return;
@@ -188,12 +246,11 @@ function startPolling() {
         body: JSON.stringify({ row_id: rowIdLocal })
       });
 
-      if (!res.ok) return console.error("Poll fetch error:", res.statusText);
+      if (!res.ok) return;
 
       const data = await res.json();
       if (!data.valid) {
-        console.warn("Last 4 player IDs mismatch:", data.last4_player_ids);
-        forceLogout("Detected multiple devices or player_id change");
+        setAuthState(false, "Multiple devices detected");
       }
     } catch(err) {
       console.error("Polling error:", err);
@@ -202,4 +259,4 @@ function startPolling() {
 }
 </script>
 </body>
-</html> 
+</html>
