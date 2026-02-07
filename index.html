@@ -71,20 +71,23 @@ iframe {
 <script>
 /* ================= CONFIG ================= */
 const VERIFY_URL = "https://your-supabase/functions/v1/verify-link";
-const LOGIN_URL = "https://your-supabase/functions/v1/login-update";
-const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const LOGIN_URL  = "https://your-supabase/functions/v1/login-update";
+const APP_URL    = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+
+const POLL_INTERVAL_MS = 5000; // ⏱️ hard enforcement
 
 /* ================= STATE ================= */
-let externalId = null;   // password used as ID
-let playerId = null;
+let externalId = null;
+let playerId   = null;
+let pollTimer  = null;
 
-/* ================= AUTO LOGIN ================= */
+/* ================= BOOT ================= */
 window.addEventListener("DOMContentLoaded", async () => {
   externalId = localStorage.getItem("external_id");
-  if (externalId) {
-    unlockApp();
-    await initOneSignal(externalId);
-  }
+  if (!externalId) return;
+
+  await initOneSignal(externalId);
+  startPolling();
 });
 
 /* ================= LOGIN ================= */
@@ -95,7 +98,6 @@ async function submitPassword() {
 
   error.textContent = "";
 
-  // Verify password
   const res = await fetch(VERIFY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -111,8 +113,8 @@ async function submitPassword() {
   externalId = password;
   localStorage.setItem("external_id", externalId);
 
-  unlockApp();
   await initOneSignal(externalId);
+  startPolling();
 }
 
 /* ================= UI ================= */
@@ -121,16 +123,24 @@ function unlockApp() {
   document.getElementById("appFrame").src = APP_URL;
 }
 
-function forceLogout() {
+function forceLogout(reason) {
+  console.warn("⛔ FORCE LOGOUT:", reason);
+
   localStorage.removeItem("external_id");
   externalId = null;
   playerId = null;
+
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ================= ONESIGNAL ================= */
-async function initOneSignal(externalId) {
+/* ================= ONESIGNAL INIT ================= */
+async function initOneSignal(row_id) {
   return new Promise((resolve) => {
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function (OneSignal) {
@@ -140,35 +150,49 @@ async function initOneSignal(externalId) {
         notifyButton: { enable: true }
       });
 
-      await OneSignal.login(externalId);
+      await OneSignal.login(row_id);
+
       playerId = await OneSignal.User.getId();
-      if (!playerId) return;
+      if (!playerId) {
+        forceLogout("No OneSignal player_id");
+        return;
+      }
 
-      // Immediately register this player and kick old one
-      await registerCurrentDevice(externalId, playerId);
-
+      unlockApp();
       resolve();
     });
   });
 }
 
-/* ================= IMMEDIATE KICK ================= */
-async function registerCurrentDevice(row_id, newPlayerId) {
-  try {
-    const res = await fetch(LOGIN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id, player_id: newPlayerId })
-    });
+/* ================= HARD POLLING ENFORCEMENT ================= */
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
 
-    const data = await res.json();
-    // If server reports old device should logout, force it here
-    if (data.kick_old_device) {
-      console.warn("⛔ Previous device kicked");
+  pollTimer = setInterval(async () => {
+    if (!externalId || !playerId) return;
+
+    try {
+      const res = await fetch(LOGIN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ row_id: externalId })
+      });
+
+      const data = await res.json();
+
+      if (!data.player_id) {
+        forceLogout("No player registered");
+        return;
+      }
+
+      if (data.player_id !== playerId) {
+        forceLogout("Player ID mismatch");
+      }
+
+    } catch (err) {
+      console.error("Polling error:", err);
     }
-  } catch (e) {
-    console.error("Error registering device", e);
-  }
+  }, POLL_INTERVAL_MS);
 }
 </script>
 
