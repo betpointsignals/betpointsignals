@@ -5,12 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signal Alerts — Bet Point</title>
 
-<!-- PWA -->
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#007bff">
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
-<!-- OneSignal SDK -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
 <style>
@@ -82,30 +80,34 @@ iframe {
 <iframe id="appFrame"></iframe>
 
 <script>
-/* CONFIG */
+/* ================= CONFIG ================= */
 const VERIFY_URL   = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
 const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
+const CHECK_URL    = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/check-device";
 const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const POLL_MS      = 5000;
 
 const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
 
 let rowId = null;
 let linkId = null;
+let pollTimer = null;
 
-/* AUTO LOGIN */
+/* ================= AUTO LOGIN ================= */
 window.addEventListener("DOMContentLoaded", () => {
-  const savedRow = localStorage.getItem("rowId");
-  const savedLink = localStorage.getItem("linkId");
+  const r = localStorage.getItem("rowId");
+  const l = localStorage.getItem("linkId");
 
-  if (savedRow && savedLink) {
-    rowId = savedRow;
-    linkId = savedLink;
+  if (r && l) {
+    rowId = r;
+    linkId = l;
     unlockApp();
     initOneSignal();
+    startPolling();
   }
 });
 
-/* LOGIN */
+/* ================= LOGIN ================= */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   rowId = document.getElementById("rowIdInput").value.trim();
@@ -132,20 +134,38 @@ async function submitRowId() {
 
     unlockApp();
     initOneSignal();
+    startPolling();
 
   } catch {
     error.textContent = "Server error";
   }
 }
 
-/* UNLOCK APP */
+/* ================= UI ================= */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
   const frame = document.getElementById("appFrame");
   if (!frame.src) frame.src = APP_URL;
 }
 
-/* ONESIGNAL – THE ONLY CORRECT WAY */
+function forceLogout(reason) {
+  console.warn("⛔ KICKED:", reason);
+
+  localStorage.removeItem("rowId");
+  localStorage.removeItem("linkId");
+  rowId = null;
+  linkId = null;
+
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  document.getElementById("appFrame").src = "";
+  document.getElementById("loginOverlay").style.display = "flex";
+}
+
+/* ================= ONESIGNAL (UNCHANGED CORE FLOW) ================= */
 function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function (OneSignal) {
@@ -162,45 +182,54 @@ function initOneSignal() {
     const linkIdLocal = localStorage.getItem("linkId");
     if (!rowIdLocal) return;
 
-    // 🔔 THIS is when the player ACTUALLY exists
     OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
       if (!event.current?.optedIn) return;
 
-      try {
-        // 1️⃣ Attach external_id
-        await OneSignal.login(rowIdLocal);
+      const oneSignalId = OneSignal.User.onesignalId;
+      if (!oneSignalId) return;
 
-        // 2️⃣ Guaranteed OneSignal player ID
-        const oneSignalId = OneSignal.User.onesignalId;
-        if (!oneSignalId) {
-          console.error("OneSignal ID missing");
-          return;
-        }
+      await OneSignal.login(rowIdLocal);
 
-        console.log("✅ OneSignal ID:", oneSignalId);
-
-        // 3️⃣ Save to Supabase
-        const res = await fetch(REGISTER_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rowId: rowIdLocal,
-            linkId: linkIdLocal,
-            one_signal_id: oneSignalId,
-            device_type: deviceType
-          })
-        });
-
-        const json = await res.json();
-        console.log("✅ Supabase response:", json);
-
-      } catch (err) {
-        console.error("❌ OneSignal sync error:", err);
-      }
+      await fetch(REGISTER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowId: rowIdLocal,
+          linkId: linkIdLocal,
+          one_signal_id: oneSignalId,
+          device_type: deviceType
+        })
+      });
     });
   });
+}
+
+/* ================= HARD ENFORCEMENT ================= */
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+
+  pollTimer = setInterval(async () => {
+    if (!rowId) return;
+
+    try {
+      const res = await fetch(CHECK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowId })
+      });
+
+      const data = await res.json();
+
+      if (!data.valid) {
+        forceLogout("Device replaced");
+      }
+
+    } catch (err) {
+      console.error("Poll error", err);
+    }
+  }, POLL_MS);
 }
 </script>
 
 </body>
-</html> when its set clear any previous set external just clear the column dont delete
+</html>
