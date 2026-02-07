@@ -82,7 +82,7 @@ iframe {
 <script>
 /* ================= CONFIG ================= */
 const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const CHECK_DB_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/check-device";
+const CHECK_DB_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/check-last4"; // new function
 const POLL_MS      = 4000;
 
 let rowId = null;
@@ -95,7 +95,6 @@ async function submitRowId() {
   if (!rowId) return;
 
   error.textContent = "";
-
   localStorage.setItem("rowId", rowId);
 
   unlockApp();
@@ -153,7 +152,7 @@ async function initOneSignal() {
   });
 }
 
-/* =============== HARD POLLING (DB CHECK) =============== */
+/* =============== HARD POLLING (LAST 4 ROWS CHECK) =============== */
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
@@ -161,23 +160,16 @@ function startPolling() {
     if (!rowId) return;
 
     try {
-      const oneSignalId = await OneSignal.User.getId();
-      if (!oneSignalId) {
-        forceLogout("OneSignal id missing");
-        return;
-      }
-
       const res = await fetch(CHECK_DB_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: rowId })
+        body: JSON.stringify({ row_id: rowId, limit: 4 })
       });
 
-      const dbData = await res.json();
+      const data = await res.json();
 
-      // ⭐ Compare DB player_id with current
-      if (!dbData.latest_player_id || dbData.latest_player_id !== oneSignalId) {
-        forceLogout("Device replaced (player_id mismatch)");
+      if (!data.valid) {
+        forceLogout("Last 4 rows contain multiple player_id's");
       }
     } catch (err) {
       console.error("Polling error:", err);
