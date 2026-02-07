@@ -41,50 +41,17 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
-const HEARTBEAT_MS = 10000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
-let heartbeatTimer = null;
 let gracePeriod = false;
-
-/* ================= HEARTBEAT ================= */
-function startHeartbeat() {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (document.visibilityState !== 'visible') return;
-    if (!rowId || !loginCode) return;
-
-    window.OneSignalDeferred?.push(async function(OneSignal) {
-      try {
-        await OneSignal.login(rowId);
-        console.log("🫀 OneSignal heartbeat refreshed");
-      } catch (e) {
-        console.warn("Heartbeat failed", e);
-      }
-    });
-  }, HEARTBEAT_MS);
-}
-
-function stopHeartbeat() {
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-}
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") startHeartbeat();
-  else stopHeartbeat();
-});
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -95,17 +62,13 @@ function setAuthState(isAuthed, reason = null) {
     console.log("✅ Auth successful");
     overlay.style.display = 'none';
     frame.src = APP_URL;
-    startHeartbeat();
   } else {
     console.warn("⛔ Auth revoked:", reason);
-
     localStorage.removeItem('rowId');
     localStorage.removeItem('loginCode');
 
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-
-    stopHeartbeat();
 
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
@@ -113,15 +76,13 @@ function setAuthState(isAuthed, reason = null) {
 }
 
 /* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const savedRow = localStorage.getItem('rowId');
   const savedCode = localStorage.getItem('loginCode');
 
   if (savedRow && savedCode) {
-    console.log("🔄 Found saved credentials", { savedRow, savedCode });
     rowId = savedRow;
     loginCode = savedCode;
-
     setAuthState(true);
     initOneSignal(rowId);
     startPolling();
@@ -138,25 +99,25 @@ async function submitRowId() {
   error.textContent = '';
   spinner.style.display = 'block';
 
-  loginCode = crypto.randomUUID();
-
   try {
-    console.log("🔑 Attempting login with", { rowId, loginCode });
+    console.log("🔑 Attempting login with rowId:", rowId);
 
-    const res = await fetch(VERIFY_URL, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ row_id: rowId, code: loginCode })
+    const res = await fetch(CHECK_LAST4, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
     console.log("Login response:", data);
 
-    if (!data.valid) {
+    if (!data.success || !data.code) {
       error.textContent = 'Login failed';
       console.warn("❌ Login failed", data);
       return;
     }
+
+    loginCode = data.code;
 
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
@@ -183,10 +144,10 @@ function initOneSignal(rowId) {
   OneSignalDeferred.push(async function(OneSignal) {
     await OneSignal.init({
       appId: ONESIGNAL_APP_ID,
-      path:"/signals/",
-      serviceWorkerPath:"signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
-      notifyButton:{ enable:true }
+      path: "/signals/",
+      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
+      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
+      notifyButton: { enable: true }
     });
 
     try {
@@ -195,8 +156,8 @@ function initOneSignal(rowId) {
       console.log("🎯 OneSignal playerId:", playerId);
 
       await fetch(REGISTER_URL, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           rowId,
           loginCode,
@@ -205,7 +166,6 @@ function initOneSignal(rowId) {
         })
       });
 
-      startHeartbeat();
       console.log("✅ OneSignal initialized", { rowId, playerId });
 
     } catch(err) {
@@ -219,18 +179,12 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
-    if (gracePeriod) return;
-    if (!rowId || !loginCode) {
-      console.warn("Polling skipped: rowId or loginCode missing", { rowId, loginCode });
-      return;
-    }
+    if (gracePeriod || !rowId || !loginCode) return;
 
     try {
-      console.log("Polling checklast4 with:", { rowId, loginCode });
-
       const res = await fetch(CHECK_LAST4, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ row_id: rowId, code: loginCode })
       });
 
@@ -253,8 +207,10 @@ function startPolling() {
     }
   };
 
-  // 🔹 First poll immediately
   pollFn();
+  pollTimer = setInterval(pollFn, POLL_MS);
+}
+</script>
 
-  // 🔹 Then start interval
-  pollTimer = setInterval(pollFn, POLL_MS); give whole update
+</body>
+</html>
