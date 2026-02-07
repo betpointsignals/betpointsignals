@@ -15,15 +15,13 @@
 html, body {
   margin:0;
   height:100%;
-  width:100%;
-  font-family:Arial,sans-serif;
   background:#000;
+  font-family:Arial,sans-serif;
 }
 iframe {
   width:100%;
   height:100%;
   border:none;
-  display:block;
 }
 #loginOverlay {
   position:fixed;
@@ -33,18 +31,17 @@ iframe {
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:999;
   color:#fff;
+  z-index:999;
 }
 #loginOverlay img {
   width:96px;
-  height:96px;
   margin-bottom:16px;
 }
 #loginOverlay input {
   padding:12px;
-  font-size:16px;
   width:220px;
+  font-size:16px;
   border-radius:6px;
   border:none;
   margin-bottom:12px;
@@ -69,10 +66,10 @@ iframe {
 
 <!-- LOGIN -->
 <div id="loginOverlay">
-  <img src="./icon-1024x1024.png" alt="Logo">
+  <img src="./icon-1024x1024.png">
   <h2>Enter Password</h2>
   <input type="password" id="rowIdInput" placeholder="Password">
-  <button onclick="submitRowId()">Submit</button>
+  <button onclick="login()">Submit</button>
   <div id="loginError"></div>
 </div>
 
@@ -81,154 +78,99 @@ iframe {
 
 <script>
 /* ================= CONFIG ================= */
-const VERIFY_URL   = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const REGISTER_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device";
-const CHECK_URL    = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/check-device";
-const APP_URL      = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-const POLL_MS      = 5000;
-
-const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? "mobile" : "web";
+const APP_URL = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
+const POLL_MS = 4000;
 
 let rowId = null;
-let linkId = null;
+let currentOneSignalId = null;
 let pollTimer = null;
 
-/* ================= AUTO LOGIN ================= */
-window.addEventListener("DOMContentLoaded", () => {
-  const r = localStorage.getItem("rowId");
-  const l = localStorage.getItem("linkId");
-
-  if (r && l) {
-    rowId = r;
-    linkId = l;
-    unlockApp();
-    initOneSignal();
-    startPolling();
-  }
-});
-
 /* ================= LOGIN ================= */
-async function submitRowId() {
-  const error = document.getElementById("loginError");
-  rowId = document.getElementById("rowIdInput").value.trim();
+async function login() {
+  const input = document.getElementById("rowIdInput");
+  rowId = input.value.trim();
   if (!rowId) return;
 
-  error.textContent = "";
-
-  try {
-    const res = await fetch(VERIFY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId })
-    });
-
-    const data = await res.json();
-    if (!data.valid) {
-      error.textContent = "Invalid password";
-      return;
-    }
-
-    linkId = data.link_id;
-    localStorage.setItem("rowId", rowId);
-    localStorage.setItem("linkId", linkId);
-
-    unlockApp();
-    initOneSignal();
-    startPolling();
-
-  } catch {
-    error.textContent = "Server error";
-  }
+  localStorage.setItem("rowId", rowId);
+  initOneSignal();
 }
 
 /* ================= UI ================= */
 function unlockApp() {
   document.getElementById("loginOverlay").style.display = "none";
-  const frame = document.getElementById("appFrame");
-  if (!frame.src) frame.src = APP_URL;
+  document.getElementById("appFrame").src = APP_URL;
 }
 
-function forceLogout(reason) {
-  console.warn("⛔ KICKED:", reason);
+async function hardKick(reason) {
+  console.warn("⛔ HARD KICK:", reason);
 
-  localStorage.removeItem("rowId");
-  localStorage.removeItem("linkId");
-  rowId = null;
-  linkId = null;
+  try {
+    await OneSignal.User.logout();
+  } catch {}
 
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  localStorage.clear();
+  sessionStorage.clear();
+
+  if (pollTimer) clearInterval(pollTimer);
 
   document.getElementById("appFrame").src = "";
   document.getElementById("loginOverlay").style.display = "flex";
 }
 
-/* ================= ONESIGNAL (UNCHANGED CORE FLOW) ================= */
+/* ================= ONESIGNAL ================= */
 function initOneSignal() {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   OneSignalDeferred.push(async function (OneSignal) {
 
     await OneSignal.init({
       appId: "2b94ad70-2518-44d4-aaef-bfb95739206f",
-      path: "/signals/",
-      serviceWorkerPath: "signals/OneSignalSDKWorker.js",
-      serviceWorkerUpdaterPath: "signals/OneSignalSDKUpdaterWorker.js",
       notifyButton: { enable: true }
     });
 
-    const rowIdLocal  = localStorage.getItem("rowId");
-    const linkIdLocal = localStorage.getItem("linkId");
-    if (!rowIdLocal) return;
+    await OneSignal.login(rowId);
 
-    OneSignal.User.PushSubscription.addEventListener("change", async (event) => {
-      if (!event.current?.optedIn) return;
+    currentOneSignalId = OneSignal.User.onesignalId;
+    if (!currentOneSignalId) {
+      hardKick("No OneSignal ID");
+      return;
+    }
 
-      const oneSignalId = OneSignal.User.onesignalId;
-      if (!oneSignalId) return;
-
-      await OneSignal.login(rowIdLocal);
-
-      await fetch(REGISTER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rowId: rowIdLocal,
-          linkId: linkIdLocal,
-          one_signal_id: oneSignalId,
-          device_type: deviceType
-        })
-      });
-    });
+    unlockApp();
+    startPolling();
   });
 }
 
 /* ================= HARD ENFORCEMENT ================= */
 function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-
   pollTimer = setInterval(async () => {
-    if (!rowId) return;
-
     try {
-      const res = await fetch(CHECK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowId })
-      });
+      const id = OneSignal.User.onesignalId;
+      const sub = await OneSignal.User.PushSubscription.get();
 
-      const data = await res.json();
-
-      if (!data.valid) {
-        forceLogout("Device replaced");
+      if (!id || !sub?.optedIn) {
+        await hardKick("Push disabled");
+        return;
       }
 
-    } catch (err) {
-      console.error("Poll error", err);
+      if (id !== currentOneSignalId) {
+        await hardKick("Session replaced");
+        return;
+      }
+
+    } catch {
+      await hardKick("OneSignal desync");
     }
   }, POLL_MS);
 }
+
+/* ================= AUTO BOOT ================= */
+window.addEventListener("DOMContentLoaded", () => {
+  const saved = localStorage.getItem("rowId");
+  if (saved) {
+    rowId = saved;
+    initOneSignal();
+  }
+});
 </script>
 
 </body>
