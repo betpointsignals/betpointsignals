@@ -33,9 +33,13 @@ iframe {
   width:220px; border-radius:6px;
   border:none; margin-bottom:12px;
 }
-#loginError {
-  color:#ff4d4d; margin-top:12px;
+#loginOverlay button {
+  padding:12px 18px; font-size:16px;
+  border-radius:6px; border:none;
+  background:#007bff; color:#fff;
+  cursor:pointer;
 }
+#loginError { color:#ff4d4d; margin-top:12px; }
 #spinner {
   border:4px solid rgba(255,255,255,0.2);
   border-top:4px solid #007bff;
@@ -53,16 +57,15 @@ iframe {
 
 <body>
 
-<!-- LOGIN -->
 <div id="loginOverlay">
   <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
   <input type="password" id="rowIdInput" placeholder="Password">
+  <button id="loginBtn">Submit</button>
   <div id="loginError"></div>
   <div id="spinner"></div>
 </div>
 
-<!-- APP -->
 <iframe id="appFrame"></iframe>
 
 <script type="module">
@@ -81,7 +84,6 @@ const POLL_MS     = 5000;
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
-let gracePeriod = false;
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -118,7 +120,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-/* ================= LOGIN ================= */
+/* ================= LOGIN (NO TIMING) ================= */
 async function submitRowId() {
   const error = document.getElementById("loginError");
   const spinner = document.getElementById("spinner");
@@ -145,8 +147,6 @@ async function submitRowId() {
       return;
     }
 
-    await new Promise(r => setTimeout(r, 3000));
-
     const { data } = await supabase
       .from("signal_login")
       .select("code")
@@ -165,10 +165,6 @@ async function submitRowId() {
     localStorage.setItem("loginCode", loginCode);
 
     setAuthState(true);
-
-    gracePeriod = true;
-    setTimeout(() => (gracePeriod = false), 3000);
-
     startPolling();
 
   } catch (err) {
@@ -184,7 +180,7 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
-    if (gracePeriod || !rowId || !loginCode) return;
+    if (!rowId || !loginCode) return;
 
     try {
       const res = await fetch(CHECK_LAST4, {
@@ -208,7 +204,8 @@ function startPolling() {
   pollTimer = setInterval(pollFn, POLL_MS);
 }
 
-/* ================= ENTER KEY ONLY ================= */
+/* ================= EVENTS ================= */
+document.getElementById("loginBtn").addEventListener("click", submitRowId);
 document.getElementById("rowIdInput").addEventListener("keydown", e => {
   if (e.key === "Enter") submitRowId();
 });
