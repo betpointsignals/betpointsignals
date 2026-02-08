@@ -39,16 +39,28 @@ iframe { width:100%; height:100%; border:none; display:block; }
 <!-- APP -->
 <iframe id="appFrame"></iframe>
 
-<script>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
 /* ================= CONFIG ================= */
-const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const SUPABASE_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY'; // replace with public anon key
+const VERIFY_URL     = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const CHECK_LAST4    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const APP_URL        = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let rowId = null;
 let loginCode = null;
 let checkInterval = null;
 let autoLoginDisabled = false;
 let isSubmitting = false;
+
+/* ================= HELPER ================= */
+function getUrlParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -65,10 +77,24 @@ function setAuthState(isAuthed, reason = null) {
     frame.src = 'about:blank';
     overlay.style.display = 'flex';
     stopCheckLoop();
-    document.getElementById('loginError').textContent = "Logged out: " + reason;
+    document.getElementById('loginError').textContent = reason ? "Logged out: " + reason : "";
     autoLoginDisabled = true;
   }
 }
+
+/* ================= AUTO LOGIN ================= */
+window.addEventListener('DOMContentLoaded', async () => {
+  if (autoLoginDisabled) return;
+
+  rowId = getUrlParam('row_id');
+  if (!rowId) return;
+
+  const savedCode = localStorage.getItem('loginCode');
+  if (savedCode) {
+    loginCode = savedCode;
+    setAuthState(true);
+  }
+});
 
 /* ================= LOGIN ================= */
 async function submitRowId(event) {
@@ -88,17 +114,21 @@ async function submitRowId(event) {
   error.textContent = '';
   spinner.style.display = 'block';
 
+  stopCheckLoop(); // suspend normal polling
+
   try {
-    const res = await fetch(CHECKLAST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ row_id: rowId })
-    });
+    // wait 3 seconds after submit before fetching latest code
+    await new Promise(r => setTimeout(r, 3000));
 
-    const data = await res.json();
-    console.log("checklast response:", data);
+    const { data, error: fetchError } = await supabase
+      .from('signal_login')
+      .select('code')
+      .eq('row_id', rowId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
 
-    if (!data.success || !data.code) {
+    if (fetchError || !data || !data.code) {
       error.textContent = 'Login failed';
       return;
     }
@@ -109,6 +139,9 @@ async function submitRowId(event) {
 
     setAuthState(true);
 
+    // resume session polling after 10s
+    setTimeout(startCheckLoop, 10000);
+
   } catch (err) {
     console.error("Login error:", err);
     error.textContent = 'Server error';
@@ -118,30 +151,29 @@ async function submitRowId(event) {
   }
 }
 
-/* ================= POLL SESSION ================= */
+/* ================= POLL LATEST CODE ================= */
 async function checkLastLogin() {
   if (!rowId || !loginCode) return;
 
   try {
-    const res = await fetch(CHECKLAST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ row_id: rowId })
-    });
+    const { data, error } = await supabase
+      .from('signal_login')
+      .select('code')
+      .eq('row_id', rowId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
 
-    const data = await res.json();
-    console.log('🔎 checklast-login:', data);
-
-    if (!data.success || data.code !== loginCode) {
+    if (error || !data || data.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
-
   } catch (err) {
     console.error('checklast error:', err);
     setAuthState(false, 'checklast exception');
   }
 }
 
+/* ================= POLL INTERVAL CONTROL ================= */
 function startCheckLoop() {
   stopCheckLoop();
   checkInterval = setInterval(checkLastLogin, 5000);
@@ -159,7 +191,7 @@ document.getElementById('rowIdInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitRowId(e);
 });
 document.getElementById('loginBtn').addEventListener('click', submitRowId);
-</script>
 
+</script>
 </body>
 </html>
