@@ -41,11 +41,10 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const LOGIN_SUBMIT_URL = 'https://your-supabase/functions/v1/login-submit'; // triggers row insert
-const CHECKLAST_URL   = 'https://your-supabase/functions/v1/checklast-login'; // returns latest code
-const REGISTER_URL    = 'https://your-supabase/functions/v1/register-device';
-const APP_URL         = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType      = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const REGISTER_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const deviceType    = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
@@ -54,7 +53,7 @@ let checkInterval = null;
 let autoLoginDisabled = false;
 let isSubmitting = false;
 
-/* ================= HELPERS ================= */
+/* ================= HELPER ================= */
 function getUrlParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
@@ -75,36 +74,37 @@ function setAuthState(isAuthed, reason = null) {
     overlay.style.display = 'flex';
     stopCheckLoop();
     console.warn("Auth revoked:", reason);
-    autoLoginDisabled = true; // 🔹 prevent auto-login until manual login
+    autoLoginDisabled = true; // Prevent auto-login after kick
+    document.getElementById('loginError').textContent = "Logged out: " + reason;
   }
 }
 
 /* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', () => {
-  // Only restore session without inserting a new row
-  if (autoLoginDisabled) return;
+window.addEventListener('DOMContentLoaded', async () => {
+  if (autoLoginDisabled) return; // skip if kicked
 
-  const savedRowId = localStorage.getItem('rowId');
-  const savedCode  = localStorage.getItem('loginCode');
+  rowId = getUrlParam('row_id');
+  if (!rowId) return;
 
-  if (savedRowId && savedCode) {
-    rowId = savedRowId;
+  const savedCode = localStorage.getItem('loginCode');
+  if (savedCode) {
     loginCode = savedCode;
-    setAuthState(true); // access without creating a new row
+    // ✅ Only set auth state, do NOT insert a new row
+    setAuthState(true);
     initOneSignal(rowId);
   }
 });
 
-/* ================= LOGIN SUBMIT ================= */
-async function submitRowId(e) {
-  if (e) e.preventDefault();
+/* ================= LOGIN ================= */
+async function submitRowId(event) {
+  if (event) event.preventDefault();
   if (isSubmitting) return;
   isSubmitting = true;
-  autoLoginDisabled = false; // manual login allowed
+  autoLoginDisabled = false;
 
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
-  rowId = document.getElementById('rowIdInput').value.trim();
+  rowId = rowId || document.getElementById('rowIdInput').value.trim();
   if (!rowId) {
     isSubmitting = false;
     return;
@@ -114,22 +114,25 @@ async function submitRowId(e) {
   spinner.style.display = 'block';
 
   try {
-    // 🔹 call login-submit to insert a new row
-    const res = await fetch(LOGIN_SUBMIT_URL, {
+    // Wait a short delay for trigger to generate code
+    await new Promise(res => setTimeout(res, 200));
+
+    const res = await fetch(CHECKLAST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
-    console.log("login-submit response:", data);
+    console.log("checklast4 response:", data);
 
-    if (!data.success || !data.row) {
+    if (!data.success || !data.code) {
       error.textContent = 'Login failed';
       return;
     }
 
-    loginCode = data.row.code;
+    // ✅ Store latest code locally
+    loginCode = data.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -145,7 +148,7 @@ async function submitRowId(e) {
   }
 }
 
-/* ================= POLL LATEST SESSION ================= */
+/* ================= POLL LATEST CODE ================= */
 async function checkLastLogin() {
   if (!rowId || !loginCode) return;
 
@@ -157,22 +160,22 @@ async function checkLastLogin() {
     });
 
     const data = await res.json();
-    console.log('checklast-login response:', data);
+    console.log('🔎 checklast4:', data);
 
-    // 🔹 Force logout if code changed
+    // ✅ Force logout if stored code doesn't match latest
     if (!data.success || data.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
 
   } catch (err) {
-    console.error('checklast-login error:', err);
+    console.error('checklast error:', err);
     setAuthState(false, 'checklast exception');
   }
 }
 
 function startCheckLoop() {
   stopCheckLoop();
-  checkInterval = setInterval(checkLastLogin, 5000);
+  checkInterval = setInterval(checkLastLogin, 5000); // poll every 5s
 }
 
 function stopCheckLoop() {
@@ -209,7 +212,8 @@ function initOneSignal(rowId) {
         })
       });
 
-      console.log("OneSignal ready");
+      console.log("✅ OneSignal ready");
+
     } catch (err) {
       console.error("OneSignal error:", err);
     }
@@ -221,7 +225,7 @@ document.getElementById('rowIdInput').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitRowId(e);
 });
 document.getElementById('loginBtn').addEventListener('click', submitRowId);
-
 </script>
+
 </body>
 </html>
