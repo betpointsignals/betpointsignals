@@ -116,6 +116,25 @@ async function submitRowId() {
 
     startPolling(); // polling CHECK_LAST4
 
+    // ✅ NEW: wait 3 seconds then fetch latest code from /lastcode
+    setTimeout(async () => {
+      try {
+        const codeRes = await fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/lastcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ row_id })
+        });
+        const codeData = await codeRes.json();
+        if (codeData.success && codeData.row) {
+          latestCode = codeData.row.code;
+          localStorage.setItem('latestCode', latestCode);
+          console.log("Latest code fetched and stored:", latestCode);
+        }
+      } catch (err) {
+        console.error("Failed to fetch latest code:", err);
+      }
+    }, 3000);
+
   } catch {
     error.textContent = 'Server error';
   } finally {
@@ -184,9 +203,8 @@ function startPolling() {
 
       const data = await res.json();
       
-      // Store latest code from CHECK_LAST4 response
+      // Store latest code from CHECK_LAST4 response (optional if needed)
       if (data && data.last4_player_ids && data.last4_player_ids.length > 0) {
-        // Assuming last inserted is last element
         latestCode = data.last4_player_ids[data.last4_player_ids.length - 1];
         localStorage.setItem('latestCode', latestCode);
         console.log("Latest code stored from CHECK_LAST4:", latestCode);
