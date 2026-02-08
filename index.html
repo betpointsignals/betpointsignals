@@ -10,70 +10,15 @@
 <link rel="apple-touch-icon" href="./icon-1024x1024.png">
 
 <style>
-html, body {
-  margin:0;
-  height:100%;
-  width:100%;
-  font-family:Arial,sans-serif;
-  background:#000;
-}
-iframe {
-  width:100%;
-  height:100%;
-  border:none;
-  display:block;
-}
-#loginOverlay {
-  position:fixed;
-  inset:0;
-  background:#000;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
-  z-index:999;
-  color:#fff;
-}
-#loginOverlay img {
-  width:96px;
-  height:96px;
-  margin-bottom:16px;
-}
-#loginOverlay input {
-  padding:12px;
-  font-size:16px;
-  width:220px;
-  border-radius:6px;
-  border:none;
-  margin-bottom:12px;
-}
-#loginOverlay button {
-  padding:12px 18px;
-  font-size:16px;
-  border-radius:6px;
-  border:none;
-  background:#007bff;
-  color:#fff;
-  cursor:pointer;
-}
-#loginError {
-  color:#ff4d4d;
-  margin-top:12px;
-}
-#spinner {
-  border:4px solid rgba(255,255,255,0.2);
-  border-top:4px solid #007bff;
-  border-radius:50%;
-  width:36px;
-  height:36px;
-  animation:spin 1s linear infinite;
-  margin-top:12px;
-  display:none;
-}
-@keyframes spin {
-  0% { transform:rotate(0deg); }
-  100% { transform:rotate(360deg); }
-}
+html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
+iframe { width:100%; height:100%; border:none; display:block; }
+#loginOverlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff; }
+#loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
+#loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
+#loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
+#loginError { color:#ff4d4d; margin-top:12px; }
+#spinner { border:4px solid rgba(255,255,255,0.2); border-top:4px solid #007bff; border-radius:50%; width:36px; height:36px; animation:spin 1s linear infinite; margin-top:12px; display:none; }
+@keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
 </style>
 </head>
 
@@ -81,7 +26,7 @@ iframe {
 
 <!-- LOGIN -->
 <div id="loginOverlay">
-  <img src="./icon-1024x1024.png">
+  <img src="./icon-1024x1024.png" alt="Logo">
   <h2>Enter Password</h2>
   <input type="password" id="rowIdInput" placeholder="Password">
   <button onclick="submitRowId()">Submit</button>
@@ -97,24 +42,21 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js";
 
 /* ================= CONFIG ================= */
 const SUPABASE_URL = "https://iznxrukdqbrcxjzhvwyk.supabase.co";
-const SUPABASE_KEY = "<YOUR_ANON_KEY>"; // anon key only
+const SUPABASE_KEY = "<YOUR_ANON_KEY>";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const VERIFY_URL  = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link";
-const CHECK_LAST4 = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4"; // kept, not removed
+const CHECK_LAST4 = "https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4";
 const APP_URL     = "https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true";
-
 const POLL_MS     = 5000;
-const GRACE_MS    = 10000;
 
-/* ================= STATE ================= */
 let rowId = null;
 let loginCode = null;
 let pollTimer = null;
-let graceUntil = 0;
+let gracePeriod = false;
 
-/* ================= AUTH UI ================= */
-function setAuthState(isAuthed, reason=null) {
+/* ================= AUTH STATE ================= */
+function setAuthState(isAuthed) {
   const overlay = document.getElementById("loginOverlay");
   const frame = document.getElementById("appFrame");
 
@@ -122,15 +64,8 @@ function setAuthState(isAuthed, reason=null) {
     overlay.style.display = "none";
     frame.src = APP_URL;
   } else {
-    localStorage.removeItem("rowId");
-    localStorage.removeItem("loginCode");
     frame.src = "about:blank";
     overlay.style.display = "flex";
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = null;
-    if (reason) {
-      document.getElementById("loginError").textContent = "Logged out: " + reason;
-    }
   }
 }
 
@@ -142,7 +77,6 @@ window.addEventListener("DOMContentLoaded", () => {
   if (savedRow && savedCode) {
     rowId = savedRow;
     loginCode = savedCode;
-    graceUntil = Date.now() + GRACE_MS;
     setAuthState(true);
     startPolling();
   }
@@ -152,21 +86,19 @@ window.addEventListener("DOMContentLoaded", () => {
 async function submitRowId() {
   const error = document.getElementById("loginError");
   const spinner = document.getElementById("spinner");
-
   rowId = document.getElementById("rowIdInput").value.trim();
   if (!rowId) return;
 
   error.textContent = "";
   spinner.style.display = "block";
 
-  try {
-    const tempCode = crypto.randomUUID();
+  loginCode = crypto.randomUUID();
 
-    /* Step 1: verify password */
+  try {
     const verifyRes = await fetch(VERIFY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: tempCode })
+      body: JSON.stringify({ row_id: rowId, code: loginCode })
     });
 
     const verifyData = await verifyRes.json();
@@ -175,16 +107,17 @@ async function submitRowId() {
       return;
     }
 
-    /* Step 2: fetch latest code from signal_login */
-    const { data, error: dbErr } = await supabase
+    await new Promise(r => setTimeout(r, 3000));
+
+    const { data, error: codeError } = await supabase
       .from("signal_login")
       .select("code")
       .eq("row_id", rowId)
-      .order("created_at", { ascending:false })
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (dbErr || !data?.code) {
+    if (codeError || !data?.code) {
       error.textContent = "Login failed";
       return;
     }
@@ -194,9 +127,9 @@ async function submitRowId() {
     localStorage.setItem("rowId", rowId);
     localStorage.setItem("loginCode", loginCode);
 
-    graceUntil = Date.now() + GRACE_MS;
-
     setAuthState(true);
+    gracePeriod = true;
+    setTimeout(() => gracePeriod = false, 3000);
     startPolling();
 
   } catch (err) {
@@ -212,26 +145,27 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
 
   const pollFn = async () => {
+    if (gracePeriod) return;
     if (!rowId || !loginCode) return;
-    if (Date.now() < graceUntil) return; // ⛔ HARD 10s BLOCK
 
     try {
-      const { data, error } = await supabase
-        .from("signal_login")
-        .select("code")
-        .eq("row_id", rowId)
-        .order("created_at", { ascending:false })
-        .limit(1)
-        .maybeSingle();
+      const res = await fetch(CHECK_LAST4, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ row_id: rowId, code: loginCode })
+      });
 
-      if (error || !data?.code) return;
+      if (!res.ok) return;
 
-      if (data.code !== loginCode) {
-        setAuthState(false, "Logged in elsewhere");
+      const data = await res.json();
+
+      // 🚫 NO FORCED LOGOUT ANYMORE
+      if (!data.valid) {
+        return;
       }
 
     } catch (err) {
-      console.error("Polling error:", err);
+      console.error("Polling exception:", err);
     }
   };
 
