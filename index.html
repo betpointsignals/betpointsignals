@@ -75,6 +75,7 @@ window.addEventListener('DOMContentLoaded', () => {
     rowId = savedRow;
     linkId = savedLink;
     latestCode = savedCode;
+    console.log("Auto-login detected. Row:", rowId, "Code:", latestCode);
     unlockApp();
     initOneSignal(rowId);
     startCodePolling();
@@ -186,6 +187,8 @@ function initOneSignal(rowId) {
 function startCodePolling() {
   if (pollInterval) clearInterval(pollInterval);
 
+  console.log("Starting code polling for row:", rowId);
+
   pollInterval = setInterval(async () => {
     if (!rowId || !latestCode) return;
 
@@ -202,8 +205,10 @@ function startCodePolling() {
         return;
       }
 
-      const serverCode = data.latest_code;
-      if (serverCode !== latestCode) {
+      const serverCode = (data.latest_code || "").toUpperCase();
+      console.log("Polling... localCode:", latestCode, "serverCode:", serverCode);
+
+      if (serverCode !== latestCode.toUpperCase()) {
         console.log("Code mismatch detected. Logging out...");
         forceLogout();
       }
@@ -216,6 +221,7 @@ function startCodePolling() {
 
 /* ================= FORCE LOGOUT ================= */
 function forceLogout() {
+  console.log("FORCE LOGOUT triggered");
   localStorage.removeItem('rowId');
   localStorage.removeItem('linkId');
   localStorage.removeItem('latestCode');
