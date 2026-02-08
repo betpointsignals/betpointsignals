@@ -125,13 +125,11 @@ async function submitRowId() {
     localStorage.setItem('latestCode', latestCode);
 
     // ✅ Insert into checklast4 immediately
-    const insertRes = await fetch(CHECK_LAST4, {
+    await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id: rowId, code: latestCode })
     });
-    const insertData = await insertRes.json();
-    console.log("checklast4 insert response:", insertData);
 
     // ✅ Unlock app immediately
     unlockApp();
@@ -210,7 +208,7 @@ function startCodePolling() {
 
 /* ================= IMMEDIATE CHECK ================= */
 async function checkCodeNow() {
-  if (!rowId || !latestCode || gracePeriod) return;
+  if (!rowId || gracePeriod) return; // Always check, even if latestCode exists
 
   try {
     const res = await fetch(GET_LATEST_CODE_URL, {
@@ -225,8 +223,8 @@ async function checkCodeNow() {
     const serverCode = (data.latest_code || "").toUpperCase();
     console.log("Polling: local:", latestCode, "server:", serverCode);
 
-    if (serverCode !== latestCode.toUpperCase()) {
-      forceLogout("Detected different latest code on server");
+    if (serverCode && serverCode !== latestCode?.toUpperCase()) {
+      forceLogout("Detected login from another device");
     }
 
   } catch(err) {
