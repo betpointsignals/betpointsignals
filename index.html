@@ -54,16 +54,17 @@ iframe { width:100%; height:100%; border:none; display:block; }
 /* CONFIG */
 const VERIFY_URL           = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL         = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const CHECK_LAST4          = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const GET_LATEST_CODE_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-latest-code';
 const APP_URL              = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const POLL_MS              = 10000; // poll every 10 seconds
 const deviceType           = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID     = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
 let latestCode = null;
-let pollInterval = null;
+let pollTimer = null;
+let gracePeriod = false;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
@@ -78,7 +79,7 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log("Auto-login detected. Row:", rowId, "Code:", latestCode);
     unlockApp();
     initOneSignal(rowId);
-    startCodePolling();
+    startPolling();
   }
 });
 
@@ -87,16 +88,11 @@ async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) {
-    error.textContent = 'Please enter a password';
-    return;
-  }
-
+  if (!rowId) return;
   error.textContent = '';
   spinner.style.display = 'block';
 
   try {
-    // Verify password
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -112,27 +108,20 @@ async function submitRowId() {
 
     linkId = data.link_id;
 
-    // Generate a new code AFTER verification
+    // Generate new code
     latestCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-    console.log("Generated code:", latestCode);
-
-    // Store locally
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
     localStorage.setItem('latestCode', latestCode);
 
-    // Insert into checklast4
-    const insertRes = await fetch(CHECK_LAST4, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: latestCode })
-    });
-    const insertData = await insertRes.json();
-    console.log("checklast4 insert response:", insertData);
-
     unlockApp();
     initOneSignal(rowId);
-    startCodePolling(); // start polling after login
+
+    // Grace period to prevent immediate kick
+    gracePeriod = true;
+    setTimeout(() => { gracePeriod = false; }, 4000);
+
+    startPolling();
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -149,6 +138,18 @@ function unlockApp() {
   if (!frame.src) frame.src = APP_URL;
 }
 
+function forceLogout(reason) {
+  console.warn("⛔ KICKED:", reason);
+  localStorage.removeItem('rowId');
+  localStorage.removeItem('linkId');
+  localStorage.removeItem('latestCode');
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  gracePeriod = false;
+  document.getElementById('appFrame').src = '';
+  document.getElementById('loginOverlay').style.display = 'flex';
+}
+
 /* ================= ONESIGNAL INIT ================= */
 function initOneSignal(rowId) {
   window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -162,78 +163,55 @@ function initOneSignal(rowId) {
     });
 
     try {
-      await OneSignal.login(rowId); // set external_id
+      await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
-
-      // Save playerId to backend
       await fetch(REGISTER_URL, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
-          rowId: rowId,
-          linkId: linkId,
-          one_signal_id: playerId,
-          device_type: deviceType
+          rowId, linkId, one_signal_id: playerId, device_type: deviceType
         })
       });
-      console.log("External ID set and playerId saved:", rowId, playerId);
+      console.log("External ID set:", rowId, playerId);
     } catch(err) {
-      console.error("Failed to set external ID:", err);
+      console.error("OneSignal init error:", err);
     }
   });
 }
 
 /* ================= POLLING FOR CODE MISMATCH ================= */
-function startCodePolling() {
-  if (pollInterval) clearInterval(pollInterval);
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  console.log("Starting latest-code polling for row:", rowId);
 
-  console.log("Starting code polling for row:", rowId);
+  pollTimer = setInterval(async () => {
+    if (gracePeriod) return;
 
-  pollInterval = setInterval(async () => {
-    if (!rowId || !latestCode) return;
+    const rowIdLocal = localStorage.getItem('rowId');
+    const codeLocal  = localStorage.getItem('latestCode');
+    if (!rowIdLocal || !codeLocal) return;
 
     try {
       const res = await fetch(GET_LATEST_CODE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: rowId })
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ row_id: rowIdLocal })
       });
+
+      if (!res.ok) return console.error("Poll fetch error:", res.statusText);
+
       const data = await res.json();
-
-      if (!data.success) {
-        console.error("Polling failed:", data.error);
-        return;
-      }
-
       const serverCode = (data.latest_code || "").toUpperCase();
-      console.log("Polling... localCode:", latestCode, "serverCode:", serverCode);
+      console.log("Polling: localCode:", codeLocal, "serverCode:", serverCode);
 
-      if (serverCode !== latestCode.toUpperCase()) {
-        console.log("Code mismatch detected. Logging out...");
-        forceLogout();
+      if (serverCode !== codeLocal.toUpperCase()) {
+        forceLogout("Detected different latest code on server");
       }
 
-    } catch (err) {
+    } catch(err) {
       console.error("Polling error:", err);
     }
-  }, 5000); // poll every 5 seconds
-}
-
-/* ================= FORCE LOGOUT ================= */
-function forceLogout() {
-  console.log("FORCE LOGOUT triggered");
-  localStorage.removeItem('rowId');
-  localStorage.removeItem('linkId');
-  localStorage.removeItem('latestCode');
-
-  rowId = null;
-  linkId = null;
-  latestCode = null;
-
-  document.getElementById('loginOverlay').style.display = 'flex';
-  document.getElementById('appFrame').src = '';
-
-  if (pollInterval) clearInterval(pollInterval);
+  }, POLL_MS);
 }
 </script>
 </body>
