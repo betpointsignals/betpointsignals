@@ -75,7 +75,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-/* ================= LOGIN ================= */
+/* ================= LOGIN & CODE GENERATION ================= */
 async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
@@ -85,7 +85,7 @@ async function submitRowId() {
   spinner.style.display = 'block';
 
   try {
-    // Verify password
+    // 1️⃣ Verify password
     const res = await fetch(VERIFY_URL, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -106,18 +106,21 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // ✅ Generate code in frontend (once)
-    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char code
+    // 2️⃣ Generate code in frontend (once)
+    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char
     localStorage.setItem('latestCode', latestCode);
     console.log("Generated code:", latestCode);
 
-    // ✅ Send generated code along with row_id to CHECK_LAST4 (insert into DB once)
+    // 3️⃣ Call CHECK_LAST4 once to store code in DB
     const insertRes = await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id, code: latestCode })
     });
-    const insertData = await insertRes.json();
+
+    const insertData = await insertRes.json().catch(e=>{
+      console.error("Failed parsing checklast4 response:", e);
+    });
     console.log("checklast4 insert response:", insertData);
 
   } catch (err) {
