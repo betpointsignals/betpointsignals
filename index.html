@@ -67,9 +67,12 @@ let latestCode = null;
 window.addEventListener('DOMContentLoaded', () => {
   const savedRow = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
-  if (savedRow && savedLink) {
+  const savedCode = localStorage.getItem('latestCode');
+
+  if (savedRow && savedLink && savedCode) {
     rowId = savedRow;
     linkId = savedLink;
+    latestCode = savedCode;
     unlockApp();
     initOneSignal(rowId);
   }
@@ -80,7 +83,11 @@ async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) return;
+  if (!rowId) {
+    error.textContent = 'Please enter a password';
+    return;
+  }
+
   error.textContent = '';
   spinner.style.display = 'block';
 
@@ -100,25 +107,27 @@ async function submitRowId() {
     }
 
     linkId = data.link_id;
-    localStorage.setItem('rowId', rowId);
-    localStorage.setItem('linkId', linkId);
 
-    unlockApp();
-    initOneSignal(rowId);
-
-    // ✅ Generate code in frontend (once)
+    // ✅ Generate a new code AFTER verification
     latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char code
-    localStorage.setItem('latestCode', latestCode);
     console.log("Generated code:", latestCode);
 
-    // ✅ Send generated code along with row_id to CHECK_LAST4 (insert into DB once)
+    // ✅ Store rowId, linkId, latestCode locally
+    localStorage.setItem('rowId', rowId);
+    localStorage.setItem('linkId', linkId);
+    localStorage.setItem('latestCode', latestCode);
+
+    // ✅ Insert code into checklast4
     const insertRes = await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id, code: latestCode })
+      body: JSON.stringify({ row_id: rowId, code: latestCode })
     });
     const insertData = await insertRes.json();
     console.log("checklast4 insert response:", insertData);
+
+    unlockApp();
+    initOneSignal(rowId);
 
   } catch (err) {
     console.error("submitRowId error:", err);
