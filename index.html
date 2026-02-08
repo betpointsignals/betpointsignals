@@ -56,14 +56,11 @@ const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/veri
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const POLL_MS      = 15000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
-let pollTimer = null;
-let gracePeriod = false;
 let latestCode = null;
 
 /* ================= AUTO LOGIN ================= */
@@ -75,7 +72,6 @@ window.addEventListener('DOMContentLoaded', () => {
     linkId = savedLink;
     unlockApp();
     initOneSignal(rowId);
-    startPolling(); // keep CHECK_LAST4 polling
   }
 });
 
@@ -110,26 +106,19 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // Grace period
-    gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, 4000);
-
-    startPolling(); // polling CHECK_LAST4 continuously
-
-    // ✅ Generate code in frontend
+    // ✅ Generate code in frontend (once)
     latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char code
     localStorage.setItem('latestCode', latestCode);
     console.log("Generated code:", latestCode);
 
-    // ✅ Send generated code along with row_id to CHECK_LAST4 (store in DB)
-    await fetch(CHECK_LAST4, {
+    // ✅ Send generated code along with row_id to CHECK_LAST4 (insert into DB once)
+    const insertRes = await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ row_id, code: latestCode })
-    })
-    .then(r => r.json())
-    .then(res => console.log("checklast4 insert response:", res))
-    .catch(err => console.error("Error sending code to checklast4:", err));
+    });
+    const insertData = await insertRes.json();
+    console.log("checklast4 insert response:", insertData);
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -178,39 +167,6 @@ function initOneSignal(rowId) {
       console.error("Failed to set external ID:", err);
     }
   });
-}
-
-/* ================= POLLING CHECK_LAST4 ================= */
-function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    if (gracePeriod) return;
-
-    const rowIdLocal = localStorage.getItem('rowId');
-    if (!rowIdLocal) return;
-
-    try {
-      const res = await fetch(CHECK_LAST4, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ row_id: rowIdLocal }) // polling just row_id
-      });
-
-      if (!res.ok) return console.error("Poll fetch error:", res.statusText);
-
-      const data = await res.json();
-      
-      // Update latest code from CHECK_LAST4 response
-      if (data && data.last4_player_ids && data.last4_player_ids.length > 0) {
-        latestCode = data.last4_player_ids[data.last4_player_ids.length - 1];
-        localStorage.setItem('latestCode', latestCode);
-        console.log("Latest code stored from CHECK_LAST4:", latestCode);
-      }
-
-    } catch(err) {
-      console.error("Polling error:", err);
-    }
-  }, POLL_MS);
 }
 </script>
 </body>
