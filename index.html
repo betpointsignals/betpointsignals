@@ -41,19 +41,14 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* ================= CONFIG ================= */
-const LOGIN_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/login-submit';
-const APP_URL   = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const CHECKLAST_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const APP_URL       = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 
 let rowId = null;
 let loginCode = null;
 let checkInterval = null;
 let autoLoginDisabled = false;
 let isSubmitting = false;
-
-/* ================= HELPER ================= */
-function getUrlParam(name) {
-  return new URLSearchParams(window.location.search).get(name);
-}
 
 /* ================= AUTH STATE ================= */
 function setAuthState(isAuthed, reason = null) {
@@ -75,20 +70,6 @@ function setAuthState(isAuthed, reason = null) {
   }
 }
 
-/* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', async () => {
-  if (autoLoginDisabled) return;
-
-  rowId = getUrlParam('row_id');
-  if (!rowId) return;
-
-  const savedCode = localStorage.getItem('loginCode');
-  if (savedCode) {
-    loginCode = savedCode;
-    setAuthState(true);
-  }
-});
-
 /* ================= LOGIN ================= */
 async function submitRowId(event) {
   if (event) event.preventDefault();
@@ -108,21 +89,21 @@ async function submitRowId(event) {
   spinner.style.display = 'block';
 
   try {
-    const res = await fetch(LOGIN_URL, {
+    const res = await fetch(CHECKLAST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
     });
 
     const data = await res.json();
-    console.log("login-submit response:", data);
+    console.log("checklast response:", data);
 
-    if (!data.success || !data.row?.code) {
+    if (!data.success || !data.code) {
       error.textContent = 'Login failed';
       return;
     }
 
-    loginCode = data.row.code;
+    loginCode = data.code;
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('loginCode', loginCode);
 
@@ -137,12 +118,12 @@ async function submitRowId(event) {
   }
 }
 
-/* ================= POLL LATEST CODE ================= */
+/* ================= POLL SESSION ================= */
 async function checkLastLogin() {
   if (!rowId || !loginCode) return;
 
   try {
-    const res = await fetch(LOGIN_URL, {
+    const res = await fetch(CHECKLAST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ row_id: rowId })
@@ -151,7 +132,7 @@ async function checkLastLogin() {
     const data = await res.json();
     console.log('🔎 checklast-login:', data);
 
-    if (!data.success || data.row?.code !== loginCode) {
+    if (!data.success || data.code !== loginCode) {
       setAuthState(false, 'session replaced');
     }
 
@@ -174,7 +155,7 @@ function stopCheckLoop() {
 }
 
 /* ================= ENTER KEY SUBMIT ================= */
-document.getElementById('rowIdInput').addEventListener('keydown', function(e) {
+document.getElementById('rowIdInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitRowId(e);
 });
 document.getElementById('loginBtn').addEventListener('click', submitRowId);
