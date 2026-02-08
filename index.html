@@ -55,6 +55,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const LASTCODE_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/lastcode';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
@@ -119,7 +120,7 @@ async function submitRowId() {
     // ✅ NEW: wait 3 seconds then fetch latest code from /lastcode
     setTimeout(async () => {
       try {
-        const codeRes = await fetch('https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/lastcode', {
+        const codeRes = await fetch(LASTCODE_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ row_id })
@@ -203,7 +204,7 @@ function startPolling() {
 
       const data = await res.json();
       
-      // Store latest code from CHECK_LAST4 response (optional if needed)
+      // Store latest code from CHECK_LAST4 response (optional)
       if (data && data.last4_player_ids && data.last4_player_ids.length > 0) {
         latestCode = data.last4_player_ids[data.last4_player_ids.length - 1];
         localStorage.setItem('latestCode', latestCode);
