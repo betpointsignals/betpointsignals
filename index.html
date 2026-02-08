@@ -55,7 +55,6 @@ iframe { width:100%; height:100%; border:none; display:block; }
 const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const LAST_CODE_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/lastcode';
 const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS      = 15000;
 const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
@@ -117,30 +116,20 @@ async function submitRowId() {
 
     startPolling(); // polling CHECK_LAST4
 
-    // ✅ NEW: wait 3 seconds then fetch latest code from /lastcode
-    setTimeout(async () => {
-      try {
-        const codeRes = await fetch(LAST_CODE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ row_id })
-        });
-        const codeData = await codeRes.json();
+    // ✅ Generate code in frontend
+    const generatedCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    latestCode = generatedCode;
+    localStorage.setItem('latestCode', latestCode);
+    console.log("Generated code:", latestCode);
 
-        // ALWAYS LOG RAW RESPONSE
-        console.log("Raw /lastcode response:", codeData);
-
-        if (codeData.success && codeData.row) {
-          latestCode = codeData.row.code;
-          localStorage.setItem('latestCode', latestCode);
-          console.log("Latest code fetched and stored:", latestCode);
-        } else {
-          console.warn("No code returned from /lastcode:", codeData);
-        }
-      } catch (err) {
-        console.error("Failed to fetch latest code:", err);
-      }
-    }, 3000);
+    // ✅ Send generated code along with row_id to CHECK_LAST4 to store
+    await fetch(CHECK_LAST4, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row_id, code: latestCode })
+    }).then(r => r.json())
+      .then(res => console.log("checklast4 store response:", res))
+      .catch(err => console.error("Error storing code in checklast4:", err));
 
   } catch (err) {
     console.error("submitRowId error:", err);
