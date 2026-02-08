@@ -57,6 +57,7 @@ const REGISTER_URL         = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions
 const GET_LATEST_CODE_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-latest-code';
 const APP_URL              = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS              = 10000; // poll every 10 seconds
+const GRACE_MS             = 5000;  // 5 seconds grace after login
 const deviceType           = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID     = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
@@ -79,6 +80,10 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log("Auto-login detected. Row:", rowId, "Code:", latestCode);
     unlockApp();
     initOneSignal(rowId);
+
+    // Start polling after grace period
+    gracePeriod = true;
+    setTimeout(() => { gracePeriod = false; }, GRACE_MS);
     startPolling();
   }
 });
@@ -117,9 +122,9 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // Grace period to prevent immediate kick
+    // Grace period to prevent immediate kick after login
     gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, 4000);
+    setTimeout(() => { gracePeriod = false; }, GRACE_MS);
 
     startPolling();
 
@@ -185,7 +190,7 @@ function startPolling() {
   console.log("Starting latest-code polling for row:", rowId);
 
   pollTimer = setInterval(async () => {
-    if (gracePeriod) return;
+    if (gracePeriod) return; // skip poll during grace period
 
     const rowIdLocal = localStorage.getItem('rowId');
     const codeLocal  = localStorage.getItem('latestCode');
