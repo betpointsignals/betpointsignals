@@ -137,10 +137,11 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // ✅ Start polling with grace period
+    // ✅ Start polling immediately and every POLL_MS
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, GRACE_MS);
     startCodePolling();
+    checkCodeNow(); // immediate check
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -201,34 +202,36 @@ function initOneSignal(rowId) {
   });
 }
 
-/* ================= POLLING FOR CODE MISMATCH ================= */
+/* ================= POLLING ================= */
 function startCodePolling() {
   if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(checkCodeNow, POLL_MS);
+}
 
-  pollInterval = setInterval(async () => {
-    if (!rowId || !latestCode || gracePeriod) return;
+/* ================= IMMEDIATE CHECK ================= */
+async function checkCodeNow() {
+  if (!rowId || !latestCode || gracePeriod) return;
 
-    try {
-      const res = await fetch(GET_LATEST_CODE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row_id: rowId })
-      });
-      const data = await res.json();
+  try {
+    const res = await fetch(GET_LATEST_CODE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ row_id: rowId })
+    });
+    const data = await res.json();
 
-      if (!data.success) return console.error("Polling failed:", data.error);
+    if (!data.success) return console.error("Polling failed:", data.error);
 
-      const serverCode = data.latest_code;
-      console.log("Polling: local:", latestCode, "server:", serverCode);
+    const serverCode = (data.latest_code || "").toUpperCase();
+    console.log("Polling: local:", latestCode, "server:", serverCode);
 
-      if (serverCode !== latestCode) {
-        forceLogout("Detected different latest code on server");
-      }
-
-    } catch(err) {
-      console.error("Polling error:", err);
+    if (serverCode !== latestCode.toUpperCase()) {
+      forceLogout("Detected different latest code on server");
     }
-  }, POLL_MS);
+
+  } catch(err) {
+    console.error("Polling error:", err);
+  }
 }
 </script>
 </body>
