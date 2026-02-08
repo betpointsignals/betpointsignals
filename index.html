@@ -52,20 +52,22 @@ iframe { width:100%; height:100%; border:none; display:block; }
 
 <script>
 /* CONFIG */
-const VERIFY_URL   = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
-const REGISTER_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
-const CHECK_LAST4  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const APP_URL      = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
-const deviceType   = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
-const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
+const VERIFY_URL           = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
+const REGISTER_URL         = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
+const CHECK_LAST4          = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
+const GET_LATEST_CODE_URL  = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-latest-code';
+const APP_URL              = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
+const deviceType           = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
+const ONESIGNAL_APP_ID     = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
 let latestCode = null;
+let pollInterval = null;
 
 /* ================= AUTO LOGIN ================= */
 window.addEventListener('DOMContentLoaded', () => {
-  const savedRow = localStorage.getItem('rowId');
+  const savedRow  = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
   const savedCode = localStorage.getItem('latestCode');
 
@@ -75,6 +77,7 @@ window.addEventListener('DOMContentLoaded', () => {
     latestCode = savedCode;
     unlockApp();
     initOneSignal(rowId);
+    startCodePolling();
   }
 });
 
@@ -108,16 +111,16 @@ async function submitRowId() {
 
     linkId = data.link_id;
 
-    // ✅ Generate a new code AFTER verification
-    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8-char code
+    // Generate a new code AFTER verification
+    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase();
     console.log("Generated code:", latestCode);
 
-    // ✅ Store rowId, linkId, latestCode locally
+    // Store locally
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
     localStorage.setItem('latestCode', latestCode);
 
-    // ✅ Insert code into checklast4
+    // Insert into checklast4
     const insertRes = await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -128,6 +131,7 @@ async function submitRowId() {
 
     unlockApp();
     initOneSignal(rowId);
+    startCodePolling(); // start polling after login
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -176,6 +180,54 @@ function initOneSignal(rowId) {
       console.error("Failed to set external ID:", err);
     }
   });
+}
+
+/* ================= POLLING FOR CODE MISMATCH ================= */
+function startCodePolling() {
+  if (pollInterval) clearInterval(pollInterval);
+
+  pollInterval = setInterval(async () => {
+    if (!rowId || !latestCode) return;
+
+    try {
+      const res = await fetch(GET_LATEST_CODE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ row_id: rowId })
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        console.error("Polling failed:", data.error);
+        return;
+      }
+
+      const serverCode = data.latest_code;
+      if (serverCode !== latestCode) {
+        console.log("Code mismatch detected. Logging out...");
+        forceLogout();
+      }
+
+    } catch (err) {
+      console.error("Polling error:", err);
+    }
+  }, 5000); // poll every 5 seconds
+}
+
+/* ================= FORCE LOGOUT ================= */
+function forceLogout() {
+  localStorage.removeItem('rowId');
+  localStorage.removeItem('linkId');
+  localStorage.removeItem('latestCode');
+
+  rowId = null;
+  linkId = null;
+  latestCode = null;
+
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('appFrame').src = '';
+
+  if (pollInterval) clearInterval(pollInterval);
 }
 </script>
 </body>
