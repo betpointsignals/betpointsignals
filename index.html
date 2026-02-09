@@ -55,7 +55,7 @@ iframe { width:100%; height:100%; border:none; display:block; }
 const VERIFY_URL          = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL        = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4         = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
-const GET_LATEST_CODE_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-latest-code';
+const HEARTBEAT_URL       = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat';
 const APP_URL             = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS             = 10000; // 10 seconds
 const GRACE_MS            = 4000;  // 4 seconds grace period for current device
@@ -81,7 +81,7 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log("Auto-login detected. Row:", rowId, "Code:", latestCode);
     unlockApp();
     initOneSignal(rowId);
-    startCodePolling();
+    startHeartbeatPolling();
   }
 });
 
@@ -135,10 +135,10 @@ async function submitRowId() {
     unlockApp();
     initOneSignal(rowId);
 
-    // ✅ Start polling immediately and every POLL_MS
+    // ✅ Start heartbeat polling
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, GRACE_MS);
-    startCodePolling();
+    startHeartbeatPolling();
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -199,41 +199,34 @@ function initOneSignal(rowId) {
   });
 }
 
-/* ================= POLLING ================= */
-function startCodePolling() {
+/* ================= HEARTBEAT POLLING ================= */
+function startHeartbeatPolling() {
   if (pollInterval) clearInterval(pollInterval);
-  checkCodeNow(); // run immediately
-  pollInterval = setInterval(checkCodeNow, POLL_MS);
+  checkHeartbeat(); // immediate check
+  pollInterval = setInterval(checkHeartbeat, POLL_MS);
 }
 
-/* ================= IMMEDIATE CHECK ================= */
-async function checkCodeNow() {
+async function checkHeartbeat() {
   if (!rowId) return;
 
   try {
-    const res = await fetch(GET_LATEST_CODE_URL, {
+    const res = await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId })
+      body: JSON.stringify({ row_id: rowId, code: latestCode })
     });
     const data = await res.json();
 
-    if (!data.success) {
-      console.error("Polling failed:", data.error);
-      return;
+    if (!data.valid) {
+      if (!gracePeriod) {
+        forceLogout("Detected login from another device via heartbeat");
+      }
     }
 
-    const serverCode = (data.latest_code || "").toUpperCase();
-    const localCode = (latestCode || "").toUpperCase();
-    console.log("Polling: local:", localCode, "server:", serverCode);
-
-    // Skip grace period only for this device's first 4s
-    if (!gracePeriod && serverCode && serverCode !== localCode) {
-      forceLogout("Detected login from another device");
-    }
+    console.log("Heartbeat check:", data.valid ? "ok" : "invalid");
 
   } catch(err) {
-    console.error("Polling error:", err);
+    console.error("Heartbeat polling error:", err);
   }
 }
 </script>
