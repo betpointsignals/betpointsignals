@@ -15,8 +15,11 @@
 html, body { margin:0; height:100%; width:100%; font-family:Arial,sans-serif; background:#000; }
 iframe { width:100%; height:100%; border:none; display:block; }
 
-#loginOverlay { position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff; }
-#loginOverlay img { width:96px; height:96px; margin-bottom:16px; }
+/* LOGIN / HOMESCREEN OVERLAY */
+#loginOverlay, #homescreenOverlay {
+  position:fixed; inset:0; background:#000; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:999; color:#fff;
+}
+#loginOverlay img, #homescreenOverlay img { width:96px; height:96px; margin-bottom:16px; }
 #loginOverlay input { padding:12px; font-size:16px; width:220px; border-radius:6px; border:none; margin-bottom:12px; }
 #loginOverlay button { padding:12px 18px; font-size:16px; border-radius:6px; border:none; background:#007bff; color:#fff; cursor:pointer; }
 #loginError { color:#ff4d4d; margin-top:12px; }
@@ -30,10 +33,9 @@ iframe { width:100%; height:100%; border:none; display:block; }
   margin-top:12px;
   display:none;
 }
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+#homescreenOverlay p { font-size:18px; text-align:center; max-width:260px; }
+#homescreenOverlay button { margin-top:12px; background:#ff4d4d; }
 </style>
 </head>
 <body>
@@ -48,17 +50,25 @@ iframe { width:100%; height:100%; border:none; display:block; }
   <div id="spinner"></div>
 </div>
 
+<!-- HOMESCREEN PROMPT OVERLAY -->
+<div id="homescreenOverlay" style="display:none;">
+  <img src="./icon-1024x1024.png" alt="Logo">
+  <h2>Add to Homescreen</h2>
+  <p>To continue, please add this app to your homescreen. After that, reopen the app and enter your password.</p>
+  <button onclick="hideHomescreenOverlay()">OK</button>
+</div>
+
 <!-- APP IFRAME -->
 <iframe id="appFrame" src="https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true"></iframe>
 
 <script>
-/* ================= CONFIG ================= */
+/* CONFIG */
 const VERIFY_URL       = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/verify-link';
 const REGISTER_URL     = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/register-device';
 const CHECK_LAST4      = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/checklast4';
 const HEARTBEAT_URL    = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/heartbeat';
-const POLL_MS          = 10000; // 10 seconds
-const GRACE_MS         = 4000;  // 4 seconds grace period
+const POLL_MS          = 10000;
+const GRACE_MS         = 4000;
 const deviceType       = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
@@ -67,62 +77,56 @@ let linkId = null;
 let pollInterval = null;
 let gracePeriod = false;
 
-/* ================= STANDALONE CHECK ================= */
-function isStandalone() {
-  // Modern PWA standard
-  if (window.matchMedia('(display-mode: standalone)').matches) return true;
-
-  // iOS Safari
-  if ('standalone' in window.navigator && window.navigator.standalone === true) return true;
-
-  // Android WebAPK
-  if (document.referrer.startsWith('android-app://')) return true;
-
-  return false;
-}
-
-/* ================= UI ================= */
+/* ================= HELPER UI ================= */
 function hideLoginOverlay() { document.getElementById('loginOverlay').style.display = 'none'; }
 function showLoginOverlay() { document.getElementById('loginOverlay').style.display = 'flex'; }
+function hideHomescreenOverlay() { document.getElementById('homescreenOverlay').style.display = 'none'; }
+function showHomescreenOverlay() { document.getElementById('homescreenOverlay').style.display = 'flex'; }
 
 function forceLogout(reason) {
   console.warn("⛔ KICKED:", reason || "Code mismatch");
   localStorage.removeItem('rowId');
   localStorage.removeItem('linkId');
   localStorage.removeItem('latestCode');
-
   rowId = null;
   linkId = null;
   showLoginOverlay();
-
   if (pollInterval) clearInterval(pollInterval);
   gracePeriod = false;
 }
 
-/* ================= AUTO LOGIN ================= */
-document.addEventListener('DOMContentLoaded', () => {
-  const loginOverlay = document.getElementById('loginOverlay');
-  const savedRow = localStorage.getItem('rowId');
+/* ================= URL PARAM CHECK ================= */
+function getRowIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('row_id');
+}
+
+/* ================= AUTO LOGIN / OVERLAY ================= */
+window.addEventListener('DOMContentLoaded', () => {
+  const urlRowId = getRowIdFromUrl();
+  const savedRow  = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
   const savedCode = localStorage.getItem('latestCode');
 
-  if (!isStandalone()) {
-    // Not standalone: hide overlay completely
-    loginOverlay.style.display = 'none';
-    console.log('Browser tab detected — login overlay hidden');
+  if (urlRowId) {
+    // If row_id exists in URL, show homescreen prompt
+    showHomescreenOverlay();
+    hideLoginOverlay();
+    console.log("row_id in URL → show add to homescreen overlay");
     return;
   }
 
-  // Standalone PWA: auto-login or show overlay
+  // Otherwise, auto-login if saved
   if (savedRow && savedLink && savedCode) {
     rowId = savedRow;
     linkId = savedLink;
-    console.log('Auto-login detected. Row:', rowId, 'Code:', savedCode);
-    loginOverlay.style.display = 'none';
+    console.log("Auto-login detected. Row:", rowId, "Code:", savedCode);
+    hideLoginOverlay();
     initOneSignal(rowId);
     startHeartbeatPolling();
   } else {
-    loginOverlay.style.display = 'flex';
+    // Show login overlay normally
+    showLoginOverlay();
   }
 });
 
@@ -131,10 +135,7 @@ async function submitRowId() {
   const error = document.getElementById('loginError');
   const spinner = document.getElementById('spinner');
   rowId = document.getElementById('rowIdInput').value.trim();
-  if (!rowId) {
-    error.textContent = 'Please enter a password';
-    return;
-  }
+  if (!rowId) { error.textContent = 'Please enter a password'; return; }
 
   error.textContent = '';
   spinner.style.display = 'block';
@@ -146,45 +147,31 @@ async function submitRowId() {
       body: JSON.stringify({ row_id: rowId })
     });
     const data = await res.json();
-
-    if (!data.valid) {
-      error.textContent = 'Invalid password';
-      spinner.style.display = 'none';
-      return;
-    }
+    if (!data.valid) { error.textContent = 'Invalid password'; spinner.style.display='none'; return; }
 
     linkId = data.link_id;
+    const newCode = Math.random().toString(36).substring(2,10).toUpperCase();
 
-    // Generate new code
-    const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    // Save locally
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
     localStorage.setItem('latestCode', newCode);
 
-    // Send to server
-    const codeToSend = localStorage.getItem('latestCode');
     await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: codeToSend })
+      body: JSON.stringify({ row_id: rowId, code: localStorage.getItem('latestCode') })
     });
 
     hideLoginOverlay();
     initOneSignal(rowId);
-
-    // Start heartbeat
     gracePeriod = true;
-    setTimeout(() => { gracePeriod = false; }, GRACE_MS);
+    setTimeout(()=>{gracePeriod=false;}, GRACE_MS);
     startHeartbeatPolling();
 
-  } catch (err) {
+  } catch(err) {
     console.error("submitRowId error:", err);
     error.textContent = 'Server error';
-  } finally {
-    spinner.style.display = 'none';
-  }
+  } finally { spinner.style.display='none'; }
 }
 
 /* ================= ONESIGNAL INIT ================= */
@@ -198,48 +185,37 @@ function initOneSignal(rowId) {
       serviceWorkerUpdaterPath:"signals/OneSignalSDKUpdaterWorker.js",
       notifyButton:{ enable:true }
     });
-
     try {
       await OneSignal.login(rowId);
       const playerId = await OneSignal.getUserId();
-      await fetch(REGISTER_URL, {
+      await fetch(REGISTER_URL,{
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ rowId, linkId, one_signal_id: playerId, device_type: deviceType })
       });
       console.log("External ID set:", rowId, playerId);
-    } catch(err) {
-      console.error("OneSignal init error:", err);
-    }
+    } catch(err){ console.error("OneSignal init error:", err); }
   });
 }
 
 /* ================= HEARTBEAT POLLING ================= */
 function startHeartbeatPolling() {
   if (pollInterval) clearInterval(pollInterval);
-  checkHeartbeat(); // immediate check
+  checkHeartbeat();
   pollInterval = setInterval(checkHeartbeat, POLL_MS);
 }
 
 async function checkHeartbeat() {
   if (!rowId) return;
-
   try {
-    const localCode = localStorage.getItem('latestCode');
-    const res = await fetch(HEARTBEAT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: localCode })
+    const res = await fetch(HEARTBEAT_URL,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ row_id: rowId, code: localStorage.getItem('latestCode') })
     });
     const data = await res.json();
-
-    if (!data.valid && !gracePeriod) {
-      forceLogout("Detected login from another device via heartbeat");
-    }
-
-  } catch(err) {
-    console.error("Heartbeat polling error:", err);
-  }
+    if (!data.valid && !gracePeriod) forceLogout("Detected login from another device via heartbeat");
+  } catch(err){ console.error("Heartbeat polling error:", err); }
 }
 </script>
 </body>
