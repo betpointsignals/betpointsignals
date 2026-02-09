@@ -68,10 +68,17 @@ let pollInterval = null;
 let gracePeriod = false;
 
 /* ================= STANDALONE CHECK ================= */
-function isStandaloneMode() {
-  return window.matchMedia('(display-mode: standalone)').matches   // Modern browsers
-      || window.navigator.standalone === true                      // iOS Safari
-      || document.referrer.startsWith('android-app://');           // Android WebAPK
+function isStandalone() {
+  // Modern PWA standard
+  if (window.matchMedia('(display-mode: standalone)').matches) return true;
+
+  // iOS Safari
+  if ('standalone' in window.navigator && window.navigator.standalone === true) return true;
+
+  // Android WebAPK
+  if (document.referrer.startsWith('android-app://')) return true;
+
+  return false;
 }
 
 /* ================= UI ================= */
@@ -93,28 +100,29 @@ function forceLogout(reason) {
 }
 
 /* ================= AUTO LOGIN ================= */
-window.addEventListener('DOMContentLoaded', () => {
-  const savedRow  = localStorage.getItem('rowId');
+document.addEventListener('DOMContentLoaded', () => {
+  const loginOverlay = document.getElementById('loginOverlay');
+  const savedRow = localStorage.getItem('rowId');
   const savedLink = localStorage.getItem('linkId');
   const savedCode = localStorage.getItem('latestCode');
 
-  if (!isStandaloneMode()) {
-    // Not standalone: hide login overlay, show iframe directly
-    hideLoginOverlay();
-    console.log("Browser tab detected: skipping login overlay");
+  if (!isStandalone()) {
+    // Not standalone: hide overlay completely
+    loginOverlay.style.display = 'none';
+    console.log('Browser tab detected — login overlay hidden');
     return;
   }
 
-  // Standalone: require login
+  // Standalone PWA: auto-login or show overlay
   if (savedRow && savedLink && savedCode) {
     rowId = savedRow;
     linkId = savedLink;
-    console.log("Auto-login detected. Row:", rowId, "Code:", savedCode);
-    hideLoginOverlay();
+    console.log('Auto-login detected. Row:', rowId, 'Code:', savedCode);
+    loginOverlay.style.display = 'none';
     initOneSignal(rowId);
     startHeartbeatPolling();
   } else {
-    showLoginOverlay();
+    loginOverlay.style.display = 'flex';
   }
 });
 
