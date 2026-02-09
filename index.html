@@ -64,7 +64,6 @@ const ONESIGNAL_APP_ID    = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
 let rowId = null;
 let linkId = null;
-let latestCode = null;
 let pollInterval = null;
 let gracePeriod = false;
 
@@ -77,8 +76,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (savedRow && savedLink && savedCode) {
     rowId = savedRow;
     linkId = savedLink;
-    latestCode = savedCode;
-    console.log("Auto-login detected. Row:", rowId, "Code:", latestCode);
+    console.log("Auto-login detected. Row:", rowId, "Code:", savedCode);
     unlockApp();
     initOneSignal(rowId);
     startHeartbeatPolling();
@@ -116,19 +114,23 @@ async function submitRowId() {
     linkId = data.link_id;
 
     // ✅ Generate new code
-    latestCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-    console.log("Generated code:", latestCode);
+    const newCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    console.log("Generated code:", newCode);
 
-    // ✅ Store locally
+    // ✅ Save to localStorage
     localStorage.setItem('rowId', rowId);
     localStorage.setItem('linkId', linkId);
-    localStorage.setItem('latestCode', latestCode);
+    localStorage.setItem('latestCode', newCode);
 
-    // ✅ Insert into checklast4 immediately
+    // ✅ Read from localStorage to ensure sending saved value
+    const codeToSend = localStorage.getItem('latestCode');
+    console.log("Sending code from localStorage:", codeToSend);
+
+    // ✅ Insert into checklast4 using localStorage code
     await fetch(CHECK_LAST4, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: latestCode })
+      body: JSON.stringify({ row_id: rowId, code: codeToSend })
     });
 
     // ✅ Unlock app immediately
@@ -163,7 +165,6 @@ function forceLogout(reason) {
 
   rowId = null;
   linkId = null;
-  latestCode = null;
 
   document.getElementById('loginOverlay').style.display = 'flex';
   document.getElementById('appFrame').src = '';
@@ -210,10 +211,14 @@ async function checkHeartbeat() {
   if (!rowId) return;
 
   try {
+    // ✅ Always read latest code from localStorage
+    const localCode = localStorage.getItem('latestCode');
+    console.log("Heartbeat sending localStorage code:", localCode);
+
     const res = await fetch(HEARTBEAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ row_id: rowId, code: latestCode })
+      body: JSON.stringify({ row_id: rowId, code: localCode })
     });
     const data = await res.json();
 
