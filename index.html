@@ -58,7 +58,7 @@ const CHECK_LAST4         = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/
 const GET_LATEST_CODE_URL = 'https://iznxrukdqbrcxjzhvwyk.supabase.co/functions/v1/get-latest-code';
 const APP_URL             = 'https://bet-point.appsmith.com/app/signals/page1-68b217383a43874978908b5c?embed=true';
 const POLL_MS             = 10000; // 10 seconds
-const GRACE_MS            = 4000;  // 4 seconds grace period
+const GRACE_MS            = 4000;  // 4 seconds grace period for current device
 const deviceType          = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'web';
 const ONESIGNAL_APP_ID    = "2b94ad70-2518-44d4-aaef-bfb95739206f";
 
@@ -139,7 +139,6 @@ async function submitRowId() {
     gracePeriod = true;
     setTimeout(() => { gracePeriod = false; }, GRACE_MS);
     startCodePolling();
-    checkCodeNow(); // immediate check
 
   } catch (err) {
     console.error("submitRowId error:", err);
@@ -203,12 +202,13 @@ function initOneSignal(rowId) {
 /* ================= POLLING ================= */
 function startCodePolling() {
   if (pollInterval) clearInterval(pollInterval);
+  checkCodeNow(); // run immediately
   pollInterval = setInterval(checkCodeNow, POLL_MS);
 }
 
 /* ================= IMMEDIATE CHECK ================= */
 async function checkCodeNow() {
-  if (!rowId || gracePeriod) return; // Always check, even if latestCode exists
+  if (!rowId) return;
 
   try {
     const res = await fetch(GET_LATEST_CODE_URL, {
@@ -218,12 +218,17 @@ async function checkCodeNow() {
     });
     const data = await res.json();
 
-    if (!data.success) return console.error("Polling failed:", data.error);
+    if (!data.success) {
+      console.error("Polling failed:", data.error);
+      return;
+    }
 
     const serverCode = (data.latest_code || "").toUpperCase();
-    console.log("Polling: local:", latestCode, "server:", serverCode);
+    const localCode = (latestCode || "").toUpperCase();
+    console.log("Polling: local:", localCode, "server:", serverCode);
 
-    if (serverCode && serverCode !== latestCode?.toUpperCase()) {
+    // Skip grace period only for this device's first 4s
+    if (!gracePeriod && serverCode && serverCode !== localCode) {
       forceLogout("Detected login from another device");
     }
 
